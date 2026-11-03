@@ -1,5 +1,7 @@
 # RE-Sandbox: Containerized Reverse Engineering & DSP MCP Toolkit
 
+[![Build & Publish Docker Image](https://github.com/mat-ocl/redo/actions/workflows/docker-image.yml/badge.svg)](https://github.com/mat-ocl/redo/actions/workflows/docker-image.yml)
+
 **RE-Sandbox** (`re-sandbox:latest`) is a hardened, air-gapped Docker environment and **Model Context Protocol (MCP)** server (`re_mcp_server.py`) that equips AI coding agents (Antigravity, Zed, Claude Code, Cursor, Windsurf, VS Code) and human analysts with **50 specialized reverse-engineering, binary triage, decompilation, hex conversion, and DSP analysis tools**.
 
 ---
@@ -59,8 +61,13 @@ You can install and run **RE-Sandbox** in two ways:
 
 Because `re_mcp_server.py` is baked directly into `/opt/re-mcp/re_mcp_server.py` (with an unbuffered wrapper at `/usr/local/bin/re-mcp-server`) inside the Docker image, an AI agent can install the entire toolkit directly from the GitHub URL without cloning the repository:
 
-#### Step 1: Build the Image Directly from the GitHub URL
+#### Step 1: Pull the Pre-Built GHCR Image (Fastest) or Build Directly from GitHub
 ```bash
+# Option A: Pull the pre-built image from GitHub Container Registry (GHCR) and tag locally:
+docker pull ghcr.io/mat-ocl/redo:latest
+docker tag ghcr.io/mat-ocl/redo:latest re-sandbox:latest
+
+# Option B: Or build directly from the remote GitHub URL (no local git clone needed):
 docker build --target final -t re-sandbox:latest https://github.com/mat-ocl/redo.git
 ```
 
@@ -389,6 +396,9 @@ When you work in **any** project under `C:\CODE\<ProjectName>` (or `$env:RE_HOST
 
 ```text
 .
+├── .github/
+│   └── workflows/
+│       └── docker-image.yml    # GitHub Actions CI/CD workflow (builds, smoke-tests & publishes to GHCR)
 ├── Dockerfile                  # 4-stage Ubuntu 24.04 container build (includes dsp56300-disasm & binhexconv)
 ├── compose.yml                 # Hardened 'static' and 'dynamic' Docker Compose profiles
 ├── re_mcp_server.py            # FastMCP server exposing 50 reverse-engineering, hex & DSP tools

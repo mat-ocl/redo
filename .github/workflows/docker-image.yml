@@ -1,0 +1,120 @@
+name: Build & Publish Docker Image
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*.*.*"
+    paths-ignore:
+      - "**.md"
+      - "samples/**"
+      - "output/**"
+  pull_request:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - "**.md"
+      - "samples/**"
+      - "output/**"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-publish:
+    name: Build & Push RE-Sandbox Image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate MCP Server Python AST & Tool Count
+        run: |
+          python3 - << 'EOF'
+          import ast, pathlib
+          src = pathlib.Path("re_mcp_server.py").read_text(encoding="utf-8")
+          tree = ast.parse(src)
+          tools = [
+              n.name for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef)
+              and any("tool" in ast.unparse(d) for d in n.decorator_list)
+          ]
+          print(f"[+] re_mcp_server.py AST valid ({len(tools)} MCP tools registered)")
+          assert len(tools) >= 50, f"Expected at least 50 MCP tools, found {len(tools)}"
+          EOF
+
+      - name: Free Runner Disk Space for Multi-Stage RE Toolchain Build
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/aws-cli \
+            /usr/local/aws-sam-cli \
+            /usr/share/swift || true
+          sudo docker image prune --all --force || true
+          echo "=== Disk space after cleanup ==="
+          df -h
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: final
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test published GHCR image
+        if: github.event_name != 'pull_request'
+        run: |
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository }}:sha-${GITHUB_SHA::7}" | tr '[:upper:]' '[:lower:]')
+          docker pull "${IMAGE_LOWER}"
+          docker run --rm "${IMAGE_LOWER}" /bin/bash -c "
+            set -e
+            echo '[*] Verifying installed RE & DSP toolchains...'
+            which r2 rabin2 ghidra-headless jadx apktool capa GoReSym diec ilspycmd dsp56300-disasm binhexconv bin2hext re-mcp-server
+            python3 -m py_compile /opt/re-mcp/re_mcp_server.py
+            echo '[+] All toolchains and MCP server verified!'
+          "

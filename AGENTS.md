@@ -8,10 +8,14 @@ This repository provides a hardened, containerized **Reverse Engineering & Binar
 
 If a user gives you a link to this GitHub repository and asks you to install or set up `re-sandbox` **without cloning the repository to disk**, follow these exact steps. Because `re_mcp_server.py` is baked directly into `/opt/re-mcp/re_mcp_server.py` (with an unbuffered wrapper at `/usr/local/bin/re-mcp-server`) inside the Docker image, **no local repository clone or helper scripts on disk are required**.
 
-### Step 1: Build the Docker Image Directly from GitHub
-Run `docker build` using the remote GitHub repository URL as the build context:
+### Step 1: Pull the Pre-Built GHCR Image (Fastest) or Build Directly from GitHub
+Pull the pre-built image from GitHub Container Registry (or build directly from the remote GitHub repository URL if preferred):
 
 ```bash
+# Fastest: Pull pre-built image from GHCR and tag as re-sandbox:latest
+docker pull ghcr.io/mat-ocl/redo:latest && docker tag ghcr.io/mat-ocl/redo:latest re-sandbox:latest
+
+# Alternative: Build from remote GitHub URL without cloning
 docker build --target final -t re-sandbox:latest https://github.com/mat-ocl/redo.git
 ```
 
