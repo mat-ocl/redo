@@ -97,6 +97,15 @@ RUN git clone --depth 1 https://github.com/zrax/pycdc.git /tmp/pycdc \
     && cmake --build /tmp/pycdc/build -j"$(nproc)" \
     && cmake --install /tmp/pycdc/build
 
+# Build BinHexConv (Universal Binary <-> Hex-text Converter from mat-ocl/binhexconv)
+RUN git clone --depth 1 https://github.com/mat-ocl/binhexconv.git /tmp/binhexconv \
+    && mkdir -p /opt/binhexconv/bin \
+    && SRC_DIR="$(dirname "$(find /tmp/binhexconv -name 'Converter.cpp' | head -n 1)")" \
+    && g++ -O3 -std=c++17 -I"${SRC_DIR}" "${SRC_DIR}/BinHexConv.cpp" "${SRC_DIR}/Converter.cpp" -o /opt/binhexconv/bin/binhexconv \
+    && ln -s /opt/binhexconv/bin/binhexconv /opt/binhexconv/bin/bin2hext \
+    && strip /opt/binhexconv/bin/binhexconv \
+    && rm -rf /tmp/binhexconv
+
 # Build Motorola DSP56300 Disassembler & Assembler (xemu-project/dsp56300)
 ENV RUSTUP_HOME=/tmp/rustup \
     CARGO_HOME=/tmp/cargo \
@@ -157,7 +166,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
     LD_LIBRARY_PATH="/opt/radare2/lib" \
-    PATH="/opt/radare2/bin:/opt/re-venv/bin:/opt/dsp56300/bin:/opt/jadx/bin:/opt/ghidra/support:/opt/apktool:/opt/capa:/opt/goresym:/opt/pycdc/bin:/opt/dotnet-tools:${PATH}"
+    PATH="/opt/radare2/bin:/opt/re-venv/bin:/opt/dsp56300/bin:/opt/binhexconv/bin:/opt/jadx/bin:/opt/ghidra/support:/opt/apktool:/opt/capa:/opt/goresym:/opt/pycdc/bin:/opt/dotnet-tools:${PATH}"
 
 # Install runtimes, unpackers, WASM tools, .NET SDK, LLVM/LLDB, DIE deps, and dynamic tracers
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -222,6 +231,7 @@ COPY --from=downloader /opt/die/lib /usr/lib/die
 COPY --from=downloader /opt/yara-rules /opt/yara-rules
 COPY --from=cpp-builder /opt/radare2 /opt/radare2
 COPY --from=cpp-builder /opt/pycdc /opt/pycdc
+COPY --from=cpp-builder /opt/binhexconv /opt/binhexconv
 COPY --from=cpp-builder /opt/dsp56300 /opt/dsp56300
 COPY --from=python-builder /opt/re-venv /opt/re-venv
 
@@ -234,12 +244,14 @@ RUN echo "/opt/radare2/lib" > /etc/ld.so.conf.d/radare2.conf \
     && ln -s /opt/goresym/GoReSym /usr/local/bin/GoReSym \
     && ln -s /opt/pycdc/bin/pycdc /usr/local/bin/pycdc \
     && ln -s /opt/pycdc/bin/pycdas /usr/local/bin/pycdas \
+    && ln -s /opt/binhexconv/bin/binhexconv /usr/local/bin/binhexconv \
+    && ln -s /opt/binhexconv/bin/bin2hext /usr/local/bin/bin2hext \
     && ln -s /opt/dotnet-tools/ilspycmd /usr/local/bin/ilspycmd \
     && ln -s /opt/dsp56300/bin/dsp56300-disasm /usr/local/bin/dsp56300-disasm \
     && if [ -f /opt/dsp56300/bin/dsp56300-asm ]; then ln -s /opt/dsp56300/bin/dsp56300-asm /usr/local/bin/dsp56300-asm; fi
 
 # Make toolchains globally executable and readable, but writable only by root
-RUN chmod -R a+rx /opt/radare2 /opt/ghidra /opt/jadx /opt/apktool /opt/capa /opt/goresym /opt/pycdc /opt/dsp56300 /opt/dotnet-tools /opt/re-venv /usr/lib/die /opt/yara-rules \
+RUN chmod -R a+rx /opt/radare2 /opt/ghidra /opt/jadx /opt/apktool /opt/capa /opt/goresym /opt/pycdc /opt/binhexconv /opt/dsp56300 /opt/dotnet-tools /opt/re-venv /usr/lib/die /opt/yara-rules \
     && chmod a+rx /usr/bin/diec
 
 # Copy the MCP server script into /opt/re-mcp (mount-safe) and create unbuffered wrapper in PATH

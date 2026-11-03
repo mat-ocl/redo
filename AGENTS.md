@@ -1,6 +1,6 @@
 # AI Agent Instructions (`RE-Sandbox`)
 
-This repository provides a hardened, containerized **Reverse Engineering & Binary/DSP Analysis Sandbox** (`re-sandbox:latest`) paired with a **FastMCP Server** (`re_mcp_server.py`) exposing 48 specialized tools over `stdio`.
+This repository provides a hardened, containerized **Reverse Engineering & Binary/DSP Analysis Sandbox** (`re-sandbox:latest`) paired with a **FastMCP Server** (`re_mcp_server.py`) exposing 50 specialized tools over `stdio`.
 
 ---
 
@@ -87,7 +87,7 @@ Write the following JSON to the MCP configuration file (and for Antigravity, als
 
 - **`Dockerfile`**: 4-stage Ubuntu 24.04 build:
   1. `downloader`: Fetches Ghidra Headless (`11.2`), JADX (`1.5.0`), Apktool (`2.10.0`), Mandiant `capa` (`8.0.1`) + rules, Mandiant `GoReSym` (`3.0.1`), Detect-It-Easy CLI (`diec` `3.21`), and Community YARA rules.
-  2. `cpp-builder`: Compiles Radare2 (`/opt/radare2`), Decompyle++ (`pycdc` / `pycdas` in `/opt/pycdc`), and the **Motorola DSP56300** toolchain (`dsp56300-disasm` & `dsp56300-asm` from `xemu-project/dsp56300` in `/opt/dsp56300/bin`).
+  2. `cpp-builder`: Compiles Radare2 (`/opt/radare2`), Decompyle++ (`pycdc` / `pycdas` in `/opt/pycdc`), `BinHexConv` (`binhexconv` / `bin2hext` from `mat-ocl/binhexconv` in `/opt/binhexconv/bin`), and the **Motorola DSP56300** toolchain (`dsp56300-disasm` & `dsp56300-asm` from `xemu-project/dsp56300` in `/opt/dsp56300/bin`).
   3. `python-builder`: Creates `/opt/re-venv` with `mcp[cli]`, `flare-floss`, `frida-tools`, `pyinstxtractor-ng`, `lief`, `pefile`, `pyelftools`, `r2pipe`, `yara-python`, and `capstone`.
   4. `final`: Hardened runtime image with Java 21, .NET 8 SDK (`ilspycmd`), Node.js 22 (`asar`, `synchrony`, `deobfuscator`, `js-beautify`, `rea`), WABT/Binaryen (`wasm-decompile`, `wasm2wat`), `binwalk`, `upx`, `7z`, `innoextract`, `unsquashfs`, `gdb-multiarch`, `lldb`, `strace`, `ltrace`, and `qemu-user`.
 - **`compose.yml`**: Defines two security-hardened profiles:
@@ -125,3 +125,7 @@ When asked to inspect, triage, disassemble, or decompile binaries, installers, f
    - Pass `save_output=True` to write the full `.asm` listing to `output/` for regex searching with `search_workspace_files`.
 2. Use `dsp56300_assemble` (powered by `dsp56300-asm`) to assemble DSP56300 assembly code into binary or `.lod` format when testing or verifying DSP algorithms.
 3. For control-flow / decompiler analysis in Ghidra, `ghidra_headless_analyze` also supports `processor="DSP56300:BE:24:default"`.
+
+### E. Binary Inspection & Hex-Text Conversion (`binary_hex_dump` & `binary_hex_convert`)
+1. **Never** use `read_workspace_file` on raw binary files (`.bin`, `.rom`, `.syx`, `.exe`, `.dll`). Instead, use `binary_hex_dump` to read `[byte_offset, byte_length]` windows in LLM-friendly formats (`format_style="canonical"` for offset+hex+ASCII, `"u24be"` for 24-bit DSP words, `"spaced"`, `"raw"`, or `"c_array"`) or search for byte patterns with wildcards (`search_hex_pattern="F0 43 ?? 00"`).
+2. Use `binary_hex_convert` (powered by `binhexconv` / `bin2hext`) to convert binary or SysEx files into hexadecimal text files in `output/` (`direction="bin_to_hex"`) and convert edited hex text back into binary (`direction="hex_to_bin"`).

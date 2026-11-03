@@ -517,6 +517,286 @@ def stage_text_file(
     return f"Successfully wrote text file to {dest_path}"
 
 
+def _find_hex_pattern_offsets(data: bytes, hex_pattern: str, max_hits: int = 100) -> list[int]:
+    """
+    Search `data` for a hex byte sequence with optional '??' or '**' byte wildcards
+    (e.g. 'F0 43 ?? 00' or '4D 5A 90 00'). Returns matching byte offsets.
+    """
+    cleaned = re.sub(r"0x", "", hex_pattern, flags=re.IGNORECASE)
+    tokens = re.findall(r"[0-9A-Fa-f]{2}|\?\?|\*\*", cleaned)
+    if not tokens:
+        raise ValueError(
+            f"Invalid search_hex_pattern '{hex_pattern}'. Expected hex byte pairs like 'F0 43 ?? 00'."
+        )
+    regex_parts = []
+    for tok in tokens:
+        if tok in ("??", "**"):
+            regex_parts.append(b".")
+        else:
+            b_val = int(tok, 16)
+            regex_parts.append(re.escape(bytes([b_val])))
+    byte_regex = re.compile(b"".join(regex_parts), flags=re.DOTALL)
+    hits: list[int] = []
+    for m in byte_regex.finditer(data):
+        hits.append(m.start())
+        if len(hits) >= max_hits:
+            break
+    return hits
+
+
+@mcp.tool()
+def binary_hex_dump(
+    file_path: str,
+    byte_offset: int = 0,
+    byte_length: int = 512,
+    format_style: str = "canonical",
+    bytes_per_line: int = 16,
+    search_hex_pattern: Optional[str] = None,
+    save_output: bool = False,
+    output_filename: Optional[str] = None,
+) -> str:
+    """
+    Read and format binary file bytes into LLM-friendly hexadecimal text representations,
+    with optional wildcard hex pattern search (e.g. `search_hex_pattern="F0 43 ?? 00"`).
+    Ideal for inspecting unknown binary structures, synthesizer SysEx (.syx) dumps, ROM tables,
+    DSP56300 24-bit coefficient/lookup tables, or file headers without UTF-8 corruption.
+
+    Supported `format_style` values:
+    - "canonical" (default): Offset + grouped hex bytes + printable ASCII sidebar (`hexdump -C` style).
+    - "u24be": 24-bit big-endian words (3 bytes/word) with byte offset and DSP word offset.
+    - "u16le" / "u16be" / "u32le" / "u32be": 16-bit or 32-bit grouped hex words with offsets.
+    - "spaced": Space-separated uppercase hex bytes (`F0 43 10 ...`), `bytes_per_line` per line.
+    - "raw": Continuous uppercase hex text (`F04310...`, compatible with `binhexconv` / `bin2hext`).
+    - "c_array": C/C++ array initializer (`0xF0, 0x43, ...`).
+    """
+    target = _validate_path(file_path)
+    if target.is_dir():
+        raise ValueError(f"Target path is a directory, not a file: {target}")
+
+    file_size = target.stat().st_size
+    search_summary = ""
+
+    if search_hex_pattern:
+        full_bytes = target.read_bytes()
+        hits = _find_hex_pattern_offsets(full_bytes, search_hex_pattern, max_hits=100)
+        if not hits:
+            return (
+                f"No matches found for hex pattern '{search_hex_pattern}' in {target.name} "
+                f"({file_size} bytes)."
+            )
+        hit_str = ", ".join(f"0x{h:X} ({h})" for h in hits[:30])
+        if len(hits) > 30:
+            hit_str += f" ... ({len(hits)}+ matches)"
+        search_summary = (
+            f"Hex Pattern Search '{search_hex_pattern}': {len(hits)} match(es) at offset(s): {hit_str}\n"
+        )
+        if byte_offset == 0:
+            byte_offset = hits[0]
+
+    if byte_offset < 0 or byte_offset >= max(1, file_size):
+        raise ValueError(f"byte_offset ({byte_offset}) is out of range for file of size {file_size} bytes.")
+
+    max_read = byte_length if save_output else min(max(1, byte_length), 65536)
+    with target.open("rb") as f:
+        f.seek(byte_offset)
+        chunk = f.read(max_read)
+
+    fmt = format_style.strip().lower()
+    bpl = max(1, min(bytes_per_line, 64))
+    lines: list[str] = []
+
+    if fmt == "canonical":
+        for i in range(0, len(chunk), bpl):
+            row = chunk[i : i + bpl]
+            off = byte_offset + i
+            mid = bpl // 2
+            left_hex = " ".join(f"{b:02X}" for b in row[:mid])
+            right_hex = " ".join(f"{b:02X}" for b in row[mid:])
+            hex_part = f"{left_hex}  {right_hex}" if right_hex else left_hex
+            pad_width = bpl * 3 + (1 if bpl > 1 else 0) - 1
+            ascii_part = "".join(chr(b) if 0x20 <= b <= 0x7E else "." for b in row)
+            lines.append(f"{off:08X}:  {hex_part:<{pad_width}}  |{ascii_part}|")
+    elif fmt == "u24be":
+        words_per_line = max(1, bpl // 3)
+        row_bytes = words_per_line * 3
+        for i in range(0, len(chunk), row_bytes):
+            row = chunk[i : i + row_bytes]
+            off = byte_offset + i
+            word_idx = off // 3
+            words = []
+            for j in range(0, len(row), 3):
+                w = row[j : j + 3]
+                if len(w) == 3:
+                    val = (w[0] << 16) | (w[1] << 8) | w[2]
+                    words.append(f"{val:06X}")
+                else:
+                    words.append("".join(f"{b:02X}" for b in w))
+            lines.append(f"byte 0x{off:06X} (P:${word_idx:04X}):  " + " ".join(words))
+    elif fmt in ("u16le", "u16be", "u32le", "u32be"):
+        wsize = 2 if "16" in fmt else 4
+        little = fmt.endswith("le")
+        row_bytes = max(wsize, (bpl // wsize) * wsize)
+        for i in range(0, len(chunk), row_bytes):
+            row = chunk[i : i + row_bytes]
+            off = byte_offset + i
+            words = []
+            for j in range(0, len(row), wsize):
+                w = row[j : j + wsize]
+                if len(w) == wsize:
+                    val = int.from_bytes(w, "little" if little else "big")
+                    words.append(f"{val:0{wsize * 2}X}")
+                else:
+                    words.append("".join(f"{b:02X}" for b in w))
+            lines.append(f"{off:08X}:  " + " ".join(words))
+    elif fmt == "spaced":
+        for i in range(0, len(chunk), bpl):
+            row = chunk[i : i + bpl]
+            lines.append(" ".join(f"{b:02X}" for b in row))
+    elif fmt == "raw":
+        lines.append(chunk.hex().upper())
+    elif fmt == "c_array":
+        for i in range(0, len(chunk), bpl):
+            row = chunk[i : i + bpl]
+            lines.append("  " + ", ".join(f"0x{b:02X}" for b in row) + ",")
+        if lines:
+            lines.insert(0, f"const uint8_t data[{len(chunk)}] = {{")
+            lines.append("};")
+    else:
+        raise ValueError(
+            f"Unsupported format_style '{format_style}'. Use 'canonical', 'u24be', 'u16le', "
+            "'u16be', 'u32le', 'u32be', 'spaced', 'raw', or 'c_array'."
+        )
+
+    body = "\n".join(lines)
+    saved_note = ""
+    if save_output:
+        out_root = _get_output_dir(target)
+        out_name = _safe_filename(
+            output_filename or f"{target.stem}_0x{byte_offset:X}_{len(chunk)}B_{fmt}.txt"
+        )
+        out_file = out_root / out_name
+        out_file.write_text(body, encoding="utf-8")
+        saved_note = f"Saved output to: {out_file}\n"
+
+    header = (
+        f"=== Binary Hex Dump: {target.name} (file size: {file_size} B, "
+        f"showing offset 0x{byte_offset:X}..0x{byte_offset + len(chunk):X} [{len(chunk)} B], "
+        f"style={fmt}) ===\n"
+    )
+    preview = body if len(body) <= 24000 else body[:24000] + "\n... [truncated inline preview]"
+    return header + search_summary + saved_note + preview
+
+
+@mcp.tool()
+def binary_hex_convert(
+    file_path: str,
+    direction: str = "bin_to_hex",
+    output_filename: Optional[str] = None,
+    hex_format: str = "raw",
+    byte_offset: int = 0,
+    byte_length: int = 0,
+) -> str:
+    """
+    Bidirectional Binary <-> Hexadecimal Text file converter powered by `binhexconv` (`bin2hext`)
+    and whitespace-tolerant hex decoding.
+    - `direction="bin_to_hex"` (or `"-b"`): Converts a binary file (or `[byte_offset, byte_length]`
+      slice) into a hexadecimal text file in `<project>/output/` so LLMs or external SysEx/ROM tools
+      can read, search, and edit it as text.
+      `hex_format` can be `"raw"` (continuous uppercase hex via `bin2hext -b`), `"spaced"` (16
+      space-separated uppercase hex bytes per line), or `"canonical"` (`xxd` offset+hex+ASCII).
+    - `direction="hex_to_bin"` (or `"-h"`): Converts a hexadecimal text file back into a binary
+      file in `<project>/output/`. Automatically strips spaces, newlines, or `0x` prefixes before
+      invoking `bin2hext -h`.
+    """
+    target = _validate_path(file_path)
+    if target.is_dir():
+        raise ValueError(f"Target path is a directory, not a file: {target}")
+
+    out_root = _get_output_dir(target)
+    dir_norm = direction.strip().lower()
+    binhex_bin = shutil.which("binhexconv") or shutil.which("bin2hext") or "/opt/binhexconv/bin/binhexconv"
+    has_binhex_cli = os.path.isfile(binhex_bin) and os.access(binhex_bin, os.X_OK)
+
+    if dir_norm in ("bin_to_hex", "-b", "b", "to_hex"):
+        raw_bytes = target.read_bytes()
+        if byte_offset > 0 or byte_length > 0:
+            end_off = (byte_offset + byte_length) if byte_length > 0 else len(raw_bytes)
+            raw_bytes = raw_bytes[byte_offset:end_off]
+
+        fmt = hex_format.strip().lower()
+        out_name = _safe_filename(output_filename or f"{target.stem}.hex.txt")
+        out_file = out_root / out_name
+
+        if fmt == "raw":
+            if has_binhex_cli and byte_offset == 0 and byte_length == 0:
+                res = _run_cmd([binhex_bin, "-b", str(target), str(out_file)], timeout=60)
+                if res["returncode"] != 0:
+                    out_file.write_text(raw_bytes.hex().upper(), encoding="utf-8")
+            else:
+                out_file.write_text(raw_bytes.hex().upper(), encoding="utf-8")
+        elif fmt == "spaced":
+            lines = [
+                " ".join(f"{b:02X}" for b in raw_bytes[i : i + 16])
+                for i in range(0, len(raw_bytes), 16)
+            ]
+            out_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        elif fmt == "canonical":
+            lines = []
+            for i in range(0, len(raw_bytes), 16):
+                row = raw_bytes[i : i + 16]
+                off = byte_offset + i
+                hex_part = " ".join(f"{b:02X}" for b in row)
+                ascii_part = "".join(chr(b) if 0x20 <= b <= 0x7E else "." for b in row)
+                lines.append(f"{off:08X}: {hex_part:<47}  |{ascii_part}|")
+            out_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        else:
+            raise ValueError("Unsupported hex_format. Use 'raw', 'spaced', or 'canonical'.")
+
+        preview = out_file.read_text(encoding="utf-8", errors="replace")[:1200]
+        return (
+            f"Converted binary {target.name} ({len(raw_bytes)} bytes) -> Hex text ({fmt}): {out_file}\n"
+            f"Preview:\n{preview}" + ("..." if out_file.stat().st_size > 1200 else "")
+        )
+
+    elif dir_norm in ("hex_to_bin", "-h", "h", "to_bin"):
+        text_data = target.read_text(encoding="utf-8", errors="ignore")
+        # Strip comments, 0x prefixes, and all whitespace so both raw bin2hext and spaced hex work cleanly
+        cleaned_hex = re.sub(r"0x", "", text_data, flags=re.IGNORECASE)
+        cleaned_hex = re.sub(r"[^0-9A-Fa-f]", "", cleaned_hex).upper()
+        if len(cleaned_hex) % 2 != 0:
+            raise ValueError(
+                f"Hex input in {target.name} has an odd number of hex digits ({len(cleaned_hex)} nibbles)."
+            )
+
+        out_name = _safe_filename(output_filename or f"{target.stem}_converted.bin")
+        out_file = out_root / out_name
+
+        if has_binhex_cli:
+            with tempfile.NamedTemporaryFile(
+                dir="/tmp", suffix=".hex", mode="w", encoding="utf-8", delete=False
+            ) as tf:
+                tf.write(cleaned_hex)
+                temp_hex_path = Path(tf.name)
+            try:
+                res = _run_cmd([binhex_bin, "-h", str(temp_hex_path), str(out_file)], timeout=60)
+                if res["returncode"] != 0:
+                    out_file.write_bytes(bytes.fromhex(cleaned_hex))
+            finally:
+                temp_hex_path.unlink(missing_ok=True)
+        else:
+            out_file.write_bytes(bytes.fromhex(cleaned_hex))
+
+        out_size = out_file.stat().st_size
+        return (
+            f"Converted hex text {target.name} ({len(cleaned_hex)} hex nibbles) -> "
+            f"Binary file ({out_size} bytes): {out_file}"
+        )
+    else:
+        raise ValueError(
+            f"Invalid direction '{direction}'. Use 'bin_to_hex' ('-b') or 'hex_to_bin' ('-h')."
+        )
+
+
 # =====================================================================
 # Triage, DIE (Detect-It-Easy), Headers, YARA, Capabilities & Unpacking
 # =====================================================================

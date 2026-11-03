@@ -85,3 +85,26 @@ goresym-dump() {
     fi
     GoReSym -t -d -p "$1"
 }
+
+# BinHexConv Quick Binary <-> Hex-text Helpers
+# Usage: bin2hex <input.bin> [output.hex]
+bin2hex() {
+    if [ "$#" -lt 1 ]; then
+        echo "Usage: bin2hex <input.bin> [output.hex]"
+        return 1
+    fi
+    local out_file="${2:-${1}.hex}"
+    bin2hext -b "$1" "$out_file"
+    echo "[+] Saved hex text to $out_file"
+}
+
+# Usage: hex2bin <input.hex> [output.bin]
+hex2bin() {
+    if [ "$#" -lt 1 ]; then
+        echo "Usage: hex2bin <input.hex> [output.bin]"
+        return 1
+    fi
+    local out_file="${2:-${1%.hex}.bin}"
+    bin2hext -h "$1" "$out_file"
+    echo "[+] Saved binary to $out_file"
+}

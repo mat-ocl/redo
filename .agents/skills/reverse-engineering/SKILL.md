@@ -39,3 +39,6 @@ Use the `re-sandbox-tools` MCP server whenever analyzing compiled binaries, DSP 
    - **Go**: `go_extract_symbols`
    - **WebAssembly**: `wasm_decompile`
    - **Electron / JS**: `asar_list`, `asar_extract`, `js_deobfuscate`, `js_beautify_file`
+5. **Binary Hex Inspection & Conversion (`BinHexConv`)**:
+   - Call `binary_hex_dump` to inspect raw binary windows (`[byte_offset, byte_length]`) as `canonical` hex+ASCII, `u24be` 24-bit DSP words, `spaced`, `raw`, or `c_array`, or to locate byte sequences with `search_hex_pattern` (e.g. `"F0 43 ?? 00"`).
+   - Call `binary_hex_convert` (`binhexconv` / `bin2hext`) to convert binary/SysEx/ROM files to hexadecimal text in `<project>/output/` (`direction="bin_to_hex"`) and convert hex text back into binary (`direction="hex_to_bin"`).

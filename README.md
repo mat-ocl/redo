@@ -1,15 +1,16 @@
 # RE-Sandbox: Containerized Reverse Engineering & DSP MCP Toolkit
 
-**RE-Sandbox** (`re-sandbox:latest`) is a hardened, air-gapped Docker environment and **Model Context Protocol (MCP)** server (`re_mcp_server.py`) that equips AI coding agents (Antigravity, Zed, Claude Code, Cursor, Windsurf, VS Code) and human analysts with **48 specialized reverse-engineering, binary triage, decompilation, and DSP analysis tools**.
+**RE-Sandbox** (`re-sandbox:latest`) is a hardened, air-gapped Docker environment and **Model Context Protocol (MCP)** server (`re_mcp_server.py`) that equips AI coding agents (Antigravity, Zed, Claude Code, Cursor, Windsurf, VS Code) and human analysts with **50 specialized reverse-engineering, binary triage, decompilation, hex conversion, and DSP analysis tools**.
 
 ---
 
 ## Key Features
 
 - **Air-Gapped & Privilege-Dropped Execution**: Runs with `--network none`, `cap_drop: ALL`, `no-new-privileges:true`, a read-only `/workspace/samples` mount, and drops root privileges to unprivileged user `ubuntu` (`UID 1000`) via `gosu`.
-- **48 Turnkey MCP Tools**: Unified FastMCP server (`re_mcp_server.py`) covering Native PE/ELF/Mach-O, C++ RTTI/VTables, **Motorola DSP56300** 24-bit DSP ROMs, .NET/C#, Android APK/DEX, Python/PyInstaller, Go, WebAssembly, Electron ASAR/JS, Firmware/Installers, and Dynamic Tracing.
+- **50 Turnkey MCP Tools**: Unified FastMCP server (`re_mcp_server.py`) covering Native PE/ELF/Mach-O, C++ RTTI/VTables, **Motorola DSP56300** 24-bit DSP ROMs, Binary/Hex-Text inspection & conversion (`BinHexConv`), .NET/C#, Android APK/DEX, Python/PyInstaller, Go, WebAssembly, Electron ASAR/JS, Firmware/Installers, and Dynamic Tracing.
 - **Persistent Ghidra 11.2 Headless Cache**: Automatically fingerprints binaries into `<project>/output/ghidra_cache/` so subsequent `ghidra_decompile_function` calls execute in ~3–5 seconds, plus a `fast_mode=True` option that decompiles functions in 20MB+ C++ binaries in ~8 seconds without waiting for full-program auto-analysis.
 - **Motorola DSP56300 Toolchain (`dsp56300-disasm` & `dsp56300-asm`)**: Native support for disassembling and assembling 24-bit Motorola/Freescale/NXP DSP56300 code (`u24be`, `u24le`, `u32le`, `u32be`, `u24be_swap16`) including direct byte-offset slicing from larger firmware or host binaries.
+- **LLM-Friendly Binary Hex Inspection & Conversion (`BinHexConv` / `bin2hext`)**: Built-in `binary_hex_dump` (with wildcard hex pattern search `F0 43 ??`, canonical hex+ASCII, and `u24be` 24-bit DSP word tables) and `binary_hex_convert` (powered by [`mat-ocl/binhexconv`](https://github.com/mat-ocl/binhexconv)) for converting binary/SysEx/ROM files to hexadecimal text and back.
 - **Multi-Project Path Translation**: Pass host paths (e.g. `C:/CODE/MyProject/samples/target.exe`) directly to any MCP tool—the server automatically maps the path into the container and routes all generated outputs into `C:/CODE/MyProject/output/`.
 - **Zero-Rebuild MCP Iteration**: `re_mcp_server.py` is bind-mounted into `/opt/re-mcp/re_mcp_server.py:ro` at runtime, so adding or modifying MCP tools on the host takes effect immediately without rebuilding the Docker image.
 
@@ -233,9 +234,9 @@ Add the following entry to your MCP configuration file (`claude_desktop_config.j
 
 ---
 
-## Complete MCP Tool Reference (48 Tools)
+## Complete MCP Tool Reference (50 Tools)
 
-### 1. Workspace & File Staging
+### 1. Workspace, File Staging & Binary/Hex-Text Conversion
 | MCP Tool | Description |
 | :--- | :--- |
 | `list_workspace_files` | List files in `/workspace`, `samples/`, `output/`, or a host project path (`C:/CODE/MyProject`). |
@@ -243,6 +244,8 @@ Add the following entry to your MCP configuration file (`claude_desktop_config.j
 | `search_workspace_files` | Regex search across all decompiled or extracted files in `output/`. |
 | `stage_file_from_base64` | Upload a binary or archive directly into the sandbox over MCP via Base64. |
 | `stage_text_file` | Write custom scripts, YARA rules, DSP56300 assembly, or Ghidra post-scripts into the workspace. |
+| `binary_hex_dump` | Inspect binary slices (`[byte_offset, byte_length]`) in LLM-friendly formats (`canonical` hex+ASCII, `u24be` 24-bit DSP words, `u16le`/`u32le`, `spaced`, `raw`, `c_array`) with wildcard hex pattern search (`F0 43 ??`). |
+| `binary_hex_convert` | Bidirectional Binary &harr; Hexadecimal text converter powered by [`binhexconv`](https://github.com/mat-ocl/binhexconv) (`bin2hext -b/-h`) and whitespace-tolerant hex decoding. |
 
 ### 2. Initial Triage, Headers, Entropy & Packer Detection
 | MCP Tool | Underlying Engine | Description |
@@ -364,6 +367,7 @@ Inside the interactive container shell, the following shortcuts are preloaded in
 - `jadx-dump <app.apk>` &rarr; Decompiles APK via `jadx`
 - `floss-clean <binary>` &rarr; Extracts obfuscated strings only
 - `goresym-dump <go_binary>` &rarr; Recovers Go symbols and types
+- `bin2hex <input.bin> [output.hex]` / `hex2bin <input.hex> [output.bin]` &rarr; Converts binary files to hex text and back via `bin2hext` (`binhexconv`)
 
 ---
 
@@ -385,9 +389,9 @@ When you work in **any** project under `C:\CODE\<ProjectName>` (or `$env:RE_HOST
 
 ```text
 .
-├── Dockerfile                  # 4-stage Ubuntu 24.04 container build (includes dsp56300-disasm)
+├── Dockerfile                  # 4-stage Ubuntu 24.04 container build (includes dsp56300-disasm & binhexconv)
 ├── compose.yml                 # Hardened 'static' and 'dynamic' Docker Compose profiles
-├── re_mcp_server.py            # FastMCP server exposing 48 reverse-engineering & DSP tools
+├── re_mcp_server.py            # FastMCP server exposing 50 reverse-engineering, hex & DSP tools
 ├── run_re_mcp.ps1              # Portable Windows PowerShell MCP stdio launcher
 ├── run_re_mcp.sh               # Portable Linux / macOS / WSL Bash MCP stdio launcher
 ├── install_plugin.ps1          # One-command installer for Antigravity, Zed & Docker build
