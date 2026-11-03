@@ -1,0 +1,17 @@
+{
+  "context_servers": {
+    "re-sandbox": {
+      "source": "custom",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "./run_re_mcp.ps1"
+      ],
+      "env": {}
+    }
+  }
+}

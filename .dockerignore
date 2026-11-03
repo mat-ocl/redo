@@ -1,0 +1,44 @@
+# =====================================================================
+# RE Sandbox - Docker Build Context Ignore Rules
+# Keeps `docker compose build` fast and prevents local samples/outputs
+# from leaking into image layers.
+# =====================================================================
+
+.git
+.gitignore
+.dockerignore
+.agents
+.zed
+plugin
+samples/*
+output/*
+scratch
+dist
+docs
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.exe
+*.dll
+*.so
+*.dylib
+*.bin
+*.rom
+*.7z
+*.zip
+*.rar
+*.tar
+*.gz
+*.apk
+*.asar
+*.wasm
+*.obj
+*.pdb
+README.md
+AGENTS.md
+run_re_mcp.ps1
+run_re_mcp.sh
+install_plugin.ps1
+install_zed.ps1
+install_zed.sh

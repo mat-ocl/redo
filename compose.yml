@@ -1,0 +1,89 @@
+services:
+  # =================================================================
+  # Profile: Static Analysis (Air-Gapped, Read-Only Root Filesystem)
+  # Usage: docker compose --profile static run --rm re-static
+  # =================================================================
+  re-static:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    image: re-sandbox:latest
+    profiles:
+      - static
+    container_name: re-static-analysis
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./samples:/workspace/samples:ro
+      - ./output:/workspace/output:rw
+      - ./re_mcp_server.py:/opt/re-mcp/re_mcp_server.py:ro
+      - type: tmpfs
+        target: /home/ubuntu
+        tmpfs:
+          size: 536870912 # 512MB
+          mode: 1777
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=1g
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+    command: ["/bin/bash"]
+
+  # =================================================================
+  # Profile: Dynamic Analysis & Tracing (Ptrace Enabled, Isolated Bridge)
+  # Usage: docker compose --profile dynamic run --rm re-dynamic
+  # =================================================================
+  re-dynamic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    image: re-sandbox:latest
+    profiles:
+      - dynamic
+    container_name: re-dynamic-analysis
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+      - SYS_PTRACE
+    security_opt:
+      - seccomp=unconfined
+      - no-new-privileges:true
+    stdin_open: true
+    tty: true
+    networks:
+      - isolated_analysis_net
+    volumes:
+      - ./samples:/workspace/samples:ro
+      - ./output:/workspace/output:rw
+      - ./re_mcp_server.py:/opt/re-mcp/re_mcp_server.py:ro
+      - type: tmpfs
+        target: /home/ubuntu
+        tmpfs:
+          size: 536870912 # 512MB
+          mode: 1777
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+    command: ["/bin/bash"]
+
+networks:
+  isolated_analysis_net:
+    driver: bridge
+    internal: true

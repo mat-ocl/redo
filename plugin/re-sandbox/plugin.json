@@ -1,0 +1,12 @@
+{
+  "name": "re-sandbox",
+  "displayName": "RE Sandbox (Reverse Engineering & DSP)",
+  "description": "Containerized reverse-engineering toolkit for PE/ELF/Mach-O, Motorola DSP56300 firmware/ROMs, C++ RTTI/VTables, .NET, Android APK/DEX, Python, Go, WASM, and Electron binaries.",
+  "version": "1.2.0",
+  "suggestedPrompts": [
+    "Run initial triage, compiler/packer detection, and header entropy analysis on the binary in samples/",
+    "Recover C++ RTTI class hierarchies and VTable addresses from the binary in samples/",
+    "Disassemble the Motorola DSP56300 ROM in samples/ using dsp56300_disassemble and save the assembly to output/",
+    "Decompile the main entrypoint and key functions using Ghidra Headless"
+  ]
+}

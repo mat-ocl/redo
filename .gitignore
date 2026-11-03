@@ -1,0 +1,79 @@
+# =====================================================================
+# RE Sandbox - Git Ignore Rules
+# Ensures no reverse-engineering targets, binaries, or output artifacts
+# are ever accidentally committed to version control.
+# =====================================================================
+
+# Workspace input samples (keep directory stub only)
+samples/*
+!samples/.gitkeep
+
+# Workspace analysis outputs & Ghidra project caches (keep directory stub only)
+output/*
+!output/.gitkeep
+
+# Temporary & scratch directories
+scratch/
+dist/
+tmp/
+*.tmp
+*.bak
+*.swp
+
+# Binary, archive & firmware artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.sys
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+*.idb
+*.i64
+*.gpr
+*.rep/
+*.bin
+*.rom
+*.hex
+*.srec
+*.lod
+*.syx
+*.apk
+*.dex
+*.jar
+*.aar
+*.pyc
+*.wasm
+*.asar
+*.7z
+*.zip
+*.rar
+*.tar
+*.gz
+*.xz
+*.iso
+*.msi
+*.cab
+*.squashfs
+*.sqsh
+
+# Python caches & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS & Editor metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/

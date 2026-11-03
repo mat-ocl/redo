@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "re-sandbox-tools": {
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "./run_re_mcp.ps1"
+      ]
+    }
+  }
+}
