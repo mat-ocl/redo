@@ -5,14 +5,33 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="${RE_IMAGE_NAME:-re-sandbox:latest}"
 
-# 2. Resolve target project directory (arg 1 -> RE_PROJECT_DIR -> CWD if samples/output exist -> REPO_ROOT)
+PLUGIN_STATE_DIR="${HOME}/.gemini/config/plugins/re-sandbox"
+ACTIVE_WORKSPACE_FILE="${PLUGIN_STATE_DIR}/active_workspace.txt"
+
+# 2. Ensure re-sandbox:latest exists locally; auto-pull from GHCR on stderr if missing
+if ! docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
+    GHCR_IMAGE="ghcr.io/mat-ocl/redo:latest"
+    echo "[*] Local image '${IMAGE_NAME}' not found. Pulling pre-built '${GHCR_IMAGE}'..." >&2
+    if docker pull "${GHCR_IMAGE}" >&2; then
+        docker tag "${GHCR_IMAGE}" "${IMAGE_NAME}" >&2
+    fi
+fi
+
+# 3. Resolve active project directory:
+#    arg 1 -> RE_PROJECT_DIR -> PWD (when spawned per-project by Zed/Cursor/VS Code/Claude) -> active_workspace.txt -> REPO_ROOT
 PROJECT_DIR="${1:-${RE_PROJECT_DIR:-}}"
 if [[ -z "${PROJECT_DIR}" ]]; then
-    if [[ -d "${PWD}/samples" || -d "${PWD}/output" ]]; then
+    if [[ "${PWD}" != "${HOME}" && "${PWD}" != "${REPO_ROOT}" && "${PWD}" != "/" ]]; then
         PROJECT_DIR="${PWD}"
-    else
-        PROJECT_DIR="${REPO_ROOT}"
+    elif [[ -f "${ACTIVE_WORKSPACE_FILE}" ]]; then
+        SAVED_WS="$(tr -d '\r\n' < "${ACTIVE_WORKSPACE_FILE}")"
+        if [[ -n "${SAVED_WS}" && -d "${SAVED_WS}" ]]; then
+            PROJECT_DIR="${SAVED_WS}"
+        fi
     fi
+fi
+if [[ -z "${PROJECT_DIR}" ]]; then
+    PROJECT_DIR="${REPO_ROOT}"
 fi
 
 SAMPLES_DIR="${PROJECT_DIR}/samples"
@@ -30,18 +49,15 @@ DOCKER_ARGS=(
     --cap-add SYS_PTRACE
     --security-opt seccomp=unconfined
     --security-opt no-new-privileges:true
+    -e "PYTHONUNBUFFERED=1"
+    -e "RE_PROJECT_ROOT=${PROJECT_DIR}"
     -v "${SAMPLES_DIR}:/workspace/samples:ro"
     -v "${OUTPUT_DIR}:/workspace/output:rw"
-    -v "${REPO_ROOT}/re_mcp_server.py:/opt/re-mcp/re_mcp_server.py:ro"
+    -v "${PROJECT_DIR}:/workspace/project:rw"
 )
 
-# 3. Optional multi-project host directory mount
-HOST_CODE_DIR="${RE_HOST_CODE_DIR:-}"
-if [[ -n "${HOST_CODE_DIR}" && -d "${HOST_CODE_DIR}" ]]; then
-    DOCKER_ARGS+=(
-        -v "${HOST_CODE_DIR}:/workspace/host_code:rw"
-        -e "RE_HOST_CODE_ROOT=${HOST_CODE_DIR}"
-    )
+if [[ -f "${REPO_ROOT}/re_mcp_server.py" ]]; then
+    DOCKER_ARGS+=(-v "${REPO_ROOT}/re_mcp_server.py:/opt/re-mcp/re_mcp_server.py:ro")
 fi
 
 exec docker "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" re-mcp-server

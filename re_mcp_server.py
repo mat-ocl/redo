@@ -45,7 +45,7 @@ mcp = MCPServer("RE-Sandbox-Tools")
 WORKSPACE_DIR = Path("/workspace").resolve()
 SAMPLES_DIR = (WORKSPACE_DIR / "samples").resolve()
 OUTPUT_DIR = (WORKSPACE_DIR / "output").resolve()
-HOST_CODE_DIR = (WORKSPACE_DIR / "host_code").resolve()
+PROJECT_MOUNT_DIR = (WORKSPACE_DIR / "project").resolve()
 GHIDRA_CACHE_DIR = (OUTPUT_DIR / "ghidra_cache").resolve()
 TMP_DIR = Path("/tmp").resolve()
 
@@ -258,40 +258,77 @@ def _is_within(child: Path, parent: Path) -> bool:
         return False
 
 
+def _get_active_project_dir() -> Optional[Path]:
+    """
+    Return `/workspace/project` if the active user project is mounted into the container.
+    """
+    if PROJECT_MOUNT_DIR.is_dir():
+        return PROJECT_MOUNT_DIR
+    return None
+
+
 def _translate_host_path(raw_path: str) -> Path:
     """
-    Translate host paths (e.g. 'C:\\CODE\\MyProject\\samples\\target.exe', 'c:/CODE/...',
-    or custom RE_HOST_CODE_ROOT paths) and relative project paths into container paths
-    under /workspace/host_code or /workspace.
+    Translate host paths inside the active project (matching `RE_PROJECT_ROOT`, e.g.
+    'D:/Code/poco-project/samples/target.exe' or 'D:/Code/poco-project/drivers/poco.sys')
+    AND project-relative folder paths (e.g. 'samples/fw.bin', 'drivers/poco.sys',
+    'installers/setup.exe') into container paths under /workspace/samples, /workspace/output,
+    or /workspace/project.
     """
     norm = raw_path.strip().replace("\\", "/")
+    active_proj = _get_active_project_dir()
 
-    # 1. Check custom RE_HOST_CODE_ROOT environment variable if set
-    custom_root = os.environ.get("RE_HOST_CODE_ROOT", "").strip().replace("\\", "/").rstrip("/")
-    if custom_root and norm.lower().startswith(custom_root.lower()):
-        rel_part = norm[len(custom_root):].strip("/")
-        if HOST_CODE_DIR.exists():
-            cand = (HOST_CODE_DIR / rel_part).resolve() if rel_part else HOST_CODE_DIR
-            if cand.exists() or not SAMPLES_DIR.exists() or not any(SAMPLES_DIR.iterdir()):
-                return cand
+    if not norm:
+        return active_proj if active_proj is not None else WORKSPACE_DIR
 
-    # 2. Match standard Windows C:\CODE or /c/code paths
-    m = re.match(r"^(?:[a-zA-Z]:|/c)/code(?:/(.*))?$", norm, re.IGNORECASE)
-    if m:
-        rel_part = (m.group(1) or "").strip("/")
-        if HOST_CODE_DIR.exists():
-            cand = (HOST_CODE_DIR / rel_part).resolve() if rel_part else HOST_CODE_DIR
-            if cand.exists() or not SAMPLES_DIR.exists() or not any(SAMPLES_DIR.iterdir()):
-                return cand
-        # Fallback when running without /workspace/host_code mounted
-        if "/samples/" in f"/{rel_part}":
-            after_samples = rel_part.split("samples/", 1)[1]
+    # 1. Match paths inside the mounted active project root (RE_PROJECT_ROOT)
+    proj_root_env = os.environ.get("RE_PROJECT_ROOT", "").strip().replace("\\", "/").rstrip("/")
+    if proj_root_env and norm.lower().startswith(proj_root_env.lower()):
+        rel_part = norm[len(proj_root_env):].strip("/")
+        if not rel_part:
+            return active_proj if active_proj is not None else WORKSPACE_DIR
+        if rel_part.lower() == "samples" or rel_part.lower().startswith("samples/"):
+            sub = rel_part[len("samples"):].strip("/")
+            return (SAMPLES_DIR / sub).resolve() if sub else SAMPLES_DIR
+        if rel_part.lower() == "output" or rel_part.lower().startswith("output/"):
+            sub = rel_part[len("output"):].strip("/")
+            return (OUTPUT_DIR / sub).resolve() if sub else OUTPUT_DIR
+        if active_proj is not None:
+            return (active_proj / rel_part).resolve()
+
+    # 2. Fallback if a full host path contains /samples/ or /output/ (e.g. when RE_PROJECT_ROOT is unset)
+    if re.match(r"^(?:[a-zA-Z]:|/[a-zA-Z])/", norm):
+        if "/samples/" in norm.lower():
+            after_samples = re.split(r"/samples/", norm, maxsplit=1, flags=re.IGNORECASE)[1]
             return (SAMPLES_DIR / after_samples).resolve()
-        if "/output/" in f"/{rel_part}":
-            after_output = rel_part.split("output/", 1)[1]
+        if "/output/" in norm.lower():
+            after_output = re.split(r"/output/", norm, maxsplit=1, flags=re.IGNORECASE)[1]
             return (OUTPUT_DIR / after_output).resolve()
+        if active_proj is not None:
+            # Try matching trailing path segments inside /workspace/project
+            parts = Path(norm).parts
+            for idx in range(1, len(parts)):
+                sub_rel = "/".join(parts[idx:])
+                cand = (active_proj / sub_rel).resolve()
+                if cand.exists():
+                    return cand
 
+    # 3. Project-relative paths (e.g. 'samples/foo.bin', 'drivers/poco.sys', 'output/bar.c')
     if not norm.startswith("/"):
+        if norm.lower() == "samples" or norm.lower().startswith("samples/"):
+            sub = norm[len("samples"):].strip("/")
+            return (SAMPLES_DIR / sub).resolve() if sub else SAMPLES_DIR
+        if norm.lower() == "output" or norm.lower().startswith("output/"):
+            sub = norm[len("output"):].strip("/")
+            return (OUTPUT_DIR / sub).resolve() if sub else OUTPUT_DIR
+        if active_proj is not None:
+            proj_cand = (active_proj / norm).resolve()
+            if proj_cand.exists():
+                return proj_cand
+            proj_sample_cand = (SAMPLES_DIR / norm).resolve()
+            if proj_sample_cand.exists():
+                return proj_sample_cand
+            return proj_cand
         cand = (WORKSPACE_DIR / norm).resolve()
         if cand.exists():
             return cand
@@ -305,41 +342,8 @@ def _translate_host_path(raw_path: str) -> Path:
 
 def _get_output_dir(target: Optional[Path] = None) -> Path:
     """
-    Determine the appropriate 'output/' directory for the given target file.
-    If the target resides inside a project under /workspace/host_code/<project>,
-    routes output into that project's own '<project>/output' directory.
-    Otherwise defaults to /workspace/output.
+    Return the active project's mounted `/workspace/output` directory.
     """
-    if target is not None and _is_within(target, HOST_CODE_DIR):
-        anc = target if target.is_dir() else target.parent
-        proj_root = None
-        curr = anc
-        while curr != HOST_CODE_DIR and _is_within(curr, HOST_CODE_DIR):
-            if curr.name.lower() in {"samples", "output"} and curr.parent != HOST_CODE_DIR:
-                proj_root = curr.parent
-                break
-            if (
-                (curr / "samples").is_dir()
-                or (curr / "output").is_dir()
-                or (curr / ".git").exists()
-                or (curr / ".agents").exists()
-            ):
-                proj_root = curr
-                break
-            curr = curr.parent
-
-        if proj_root is None:
-            rel_parts = anc.relative_to(HOST_CODE_DIR).parts
-            proj_root = (HOST_CODE_DIR / rel_parts[0]) if rel_parts else HOST_CODE_DIR
-
-        proj_out = (proj_root / "output").resolve()
-        if _is_within(proj_out, HOST_CODE_DIR):
-            try:
-                proj_out.mkdir(parents=True, exist_ok=True)
-                return proj_out
-            except OSError:
-                pass
-
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     return OUTPUT_DIR
 

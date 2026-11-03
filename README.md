@@ -13,7 +13,7 @@
 - **Persistent Ghidra 11.2 Headless Cache**: Automatically fingerprints binaries into `<project>/output/ghidra_cache/` so subsequent `ghidra_decompile_function` calls execute in ~3–5 seconds, plus a `fast_mode=True` option that decompiles functions in 20MB+ C++ binaries in ~8 seconds without waiting for full-program auto-analysis.
 - **Motorola DSP56300 Toolchain (`dsp56300-disasm` & `dsp56300-asm`)**: Native support for disassembling and assembling 24-bit Motorola/Freescale/NXP DSP56300 code (`u24be`, `u24le`, `u32le`, `u32be`, `u24be_swap16`) including direct byte-offset slicing from larger firmware or host binaries.
 - **LLM-Friendly Binary Hex Inspection & Conversion (`BinHexConv` / `bin2hext`)**: Built-in `binary_hex_dump` (with wildcard hex pattern search `F0 43 ??`, canonical hex+ASCII, and `u24be` 24-bit DSP word tables) and `binary_hex_convert` (powered by [`mat-ocl/binhexconv`](https://github.com/mat-ocl/binhexconv)) for converting binary/SysEx/ROM files to hexadecimal text and back.
-- **Multi-Project Path Translation**: Pass host paths (e.g. `C:/CODE/MyProject/samples/target.exe`) directly to any MCP tool—the server automatically maps the path into the container and routes all generated outputs into `C:/CODE/MyProject/output/`.
+- **Automatic Per-Project Folder Mapping**: When enabled on a project (via Antigravity's `SessionStart`/`PreInvocation` plugin hook or per-project working directory in Zed, Cursor, VS Code, Windsurf, and Claude Code), `run_re_mcp.ps1` mounts **only** that active project's folders (`<Project>/samples` &rarr; `/workspace/samples:ro`, `<Project>/output` &rarr; `/workspace/output:rw`, `<Project>` &rarr; `/workspace/project:rw`) into the container.
 - **Zero-Rebuild MCP Iteration**: `re_mcp_server.py` is bind-mounted into `/opt/re-mcp/re_mcp_server.py:ro` at runtime, so adding or modifying MCP tools on the host takes effect immediately without rebuilding the Docker image.
 
 ---
@@ -72,9 +72,9 @@ docker build --target final -t re-sandbox:latest https://github.com/mat-ocl/redo
 ```
 
 #### Step 2: Configure Your Editor / MCP Client (Zero-Clone Direct Docker)
-Mount your host projects root (e.g. `C:/CODE` on Windows or `/home/user/code` on Linux) to `/workspace/host_code:rw` and set `RE_HOST_CODE_ROOT` to match:
+Mount your project directory (e.g. `D:/Code/my-project` on Windows or `/home/user/my-project` on Linux) to `/workspace/project:rw` (plus its `samples` and `output` folders) and set `RE_PROJECT_ROOT` to match:
 
-- **Zed Editor (`%APPDATA%\Zed\settings.json` on Windows, `~/.config/zed/settings.json` on Linux/macOS):**
+- **Zed Editor (`.zed/settings.json` in your project or `%APPDATA%\Zed\settings.json`):**
   ```json
   {
     "context_servers": {
@@ -93,8 +93,10 @@ Mount your host projects root (e.g. `C:/CODE` on Windows or `/home/user/code` on
           "--security-opt", "seccomp=unconfined",
           "--security-opt", "no-new-privileges:true",
           "-e", "PYTHONUNBUFFERED=1",
-          "-e", "RE_HOST_CODE_ROOT=C:/CODE",
-          "-v", "C:/CODE:/workspace/host_code:rw",
+          "-e", "RE_PROJECT_ROOT=D:/Code/my-project",
+          "-v", "D:/Code/my-project/samples:/workspace/samples:ro",
+          "-v", "D:/Code/my-project/output:/workspace/output:rw",
+          "-v", "D:/Code/my-project:/workspace/project:rw",
           "re-sandbox:latest",
           "re-mcp-server"
         ],
@@ -104,7 +106,7 @@ Mount your host projects root (e.g. `C:/CODE` on Windows or `/home/user/code` on
   }
   ```
 
-- **Google Antigravity / Claude Desktop / Cursor / Windsurf (`mcp_config.json` / `claude_desktop_config.json`):**
+- **Google Antigravity / Claude Desktop / Cursor / Windsurf (`mcp_config.json` / `.cursor/mcp.json`):**
   ```json
   {
     "mcpServers": {
@@ -122,8 +124,10 @@ Mount your host projects root (e.g. `C:/CODE` on Windows or `/home/user/code` on
           "--security-opt", "seccomp=unconfined",
           "--security-opt", "no-new-privileges:true",
           "-e", "PYTHONUNBUFFERED=1",
-          "-e", "RE_HOST_CODE_ROOT=C:/CODE",
-          "-v", "C:/CODE:/workspace/host_code:rw",
+          "-e", "RE_PROJECT_ROOT=D:/Code/my-project",
+          "-v", "D:/Code/my-project/samples:/workspace/samples:ro",
+          "-v", "D:/Code/my-project/output:/workspace/output:rw",
+          "-v", "D:/Code/my-project:/workspace/project:rw",
           "re-sandbox:latest",
           "re-mcp-server"
         ]
@@ -140,22 +144,21 @@ Mount your host projects root (e.g. `C:/CODE` on Windows or `/home/user/code` on
 - **Docker Desktop** (Windows/macOS) or **Docker Engine** (Linux) with Docker Compose v2.
 - **PowerShell 7+** (`pwsh`) on Windows, or **Bash** on Linux/macOS/WSL.
 
-#### 2. Build the Docker Image & Install the Plugin
-From PowerShell inside the cloned repository directory:
+#### 2. Run the One-Command Installer (Pulls Pre-Built GHCR Image Automatically)
+From PowerShell inside the cloned repository directory (even if cloned into a temporary `scratch` or `/tmp` directory):
 
 ```powershell
-# Build the Docker image AND install/update the Antigravity re-sandbox plugin:
-.\install_plugin.ps1 -BuildImage
+# Pulls pre-built ghcr.io/mat-ocl/redo:latest (if needed) and installs the self-contained Antigravity & Zed plugins:
+.\install_plugin.ps1
+
+# Optional: Also copy .agents rules & skills into your active project workspace at the same time:
+.\install_plugin.ps1 -TargetWorkspace "D:\Code\my-project"
 ```
 
-Or build the Docker image manually using Docker Compose:
-
-```bash
-docker compose --profile static build
-```
+*(Only pass `.\install_plugin.ps1 -BuildImage` if you modified `Dockerfile` and want to recompile the 4-stage image locally from scratch instead of pulling `ghcr.io/mat-ocl/redo:latest`).*
 
 > [!TIP]
-> If you move or clone this repository to a new folder and already have the `re-sandbox:latest` image built, simply run `.\install_plugin.ps1` (without `-BuildImage`) to point your Antigravity plugin configuration to the new folder in under a second.
+> **Self-Contained Scratch Clone Support**: `install_plugin.ps1` copies `run_re_mcp.ps1` and `re_mcp_server.py` directly into `~/.gemini/config/plugins/re-sandbox/`. If an AI agent clones this repository into a temporary `scratch` folder to run `.\install_plugin.ps1`, it does **not** need to clone the repository a second time into `C:\CODE` or `D:\Code`.
 
 ### 3. Configure MCP Clients
 
@@ -378,17 +381,16 @@ Inside the interactive container shell, the following shortcuts are preloaded in
 
 ---
 
-## Multi-Project Directory Routing
+## Automatic Per-Project Folder Mapping
 
-By default, `run_re_mcp.ps1` mounts:
+When you open a project and enable **RE-Sandbox**, `run_re_mcp.ps1` / `run_re_mcp.sh` mounts **only that project's folders** into the Docker container:
 1. `<ProjectDir>/samples` &rarr; `/workspace/samples:ro`
 2. `<ProjectDir>/output` &rarr; `/workspace/output:rw`
-3. `C:/CODE` (or the directory set in `$env:RE_HOST_CODE_DIR`) &rarr; `/workspace/host_code:rw`
+3. `<ProjectDir>` &rarr; `/workspace/project:rw`
 
-When you work in **any** project under `C:\CODE\<ProjectName>` (or `$env:RE_HOST_CODE_DIR`):
-- Place binaries/ROMs in `C:\CODE\<ProjectName>\samples\`.
-- Pass `C:/CODE/<ProjectName>/samples/<file>` to any MCP tool.
-- The MCP server automatically writes all decompiled code, extracted archives, and Ghidra caches to `C:\CODE\<ProjectName>\output\`.
+How each editor passes the active project directory to `run_re_mcp.ps1`:
+- **Google Antigravity**: Uses the bundled plugin lifecycle hook (`plugin/re-sandbox/hooks.json` &rarr; `sync_workspace.ps1`), which receives `workspacePaths[0]` on `SessionStart` / `PreInvocation`, updates `active_workspace.txt`, and triggers a live MCP reload when you switch projects.
+- **Zed Editor, Cursor, VS Code, Windsurf, and Claude Code**: Spawn the MCP server process with its working directory (`$PWD` / `Get-Location`) set to the open project root, which `run_re_mcp.ps1` and `run_re_mcp.sh` detect automatically.
 
 ---
 

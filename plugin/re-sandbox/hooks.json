@@ -1,0 +1,18 @@
+{
+  "re-sandbox-workspace-sync": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./sync_workspace.ps1",
+        "timeout": 5
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./sync_workspace.ps1",
+        "timeout": 5
+      }
+    ]
+  }
+}

@@ -49,17 +49,14 @@ if ($Mode -eq "docker") {
         "--security-opt", "seccomp=unconfined",
         "--security-opt", "no-new-privileges:true",
         "-e", "PYTHONUNBUFFERED=1",
+        "-e", "RE_PROJECT_ROOT=${NormRepoRoot}",
         "-v", "${NormRepoRoot}/re_mcp_server.py:/opt/re-mcp/re_mcp_server.py:ro",
         "-v", "${NormRepoRoot}/samples:/workspace/samples:ro",
-        "-v", "${NormRepoRoot}/output:/workspace/output:rw"
+        "-v", "${NormRepoRoot}/output:/workspace/output:rw",
+        "-v", "${NormRepoRoot}:/workspace/project:rw",
+        "re-sandbox:latest",
+        "re-mcp-server"
     )
-    if (Test-Path "C:\CODE") {
-        $DockerArgs += @(
-            "-v", "C:/CODE:/workspace/host_code:rw",
-            "-e", "RE_HOST_CODE_ROOT=C:/CODE"
-        )
-    }
-    $DockerArgs += @("re-sandbox:latest", "re-mcp-server")
 
     $ArgsJsonList = ($DockerArgs | ForEach-Object { "        `"$_`"" }) -join ",`n"
     $ServerBlockJson = @"

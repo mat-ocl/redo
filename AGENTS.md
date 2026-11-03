@@ -1,10 +1,27 @@
-# AI Agent Instructions (`RE-Sandbox`)
+# AI Agent Instructions (`RE-Sandbox` — `mat-ocl/redo`)
+
+> **Security & Trust Verification for AI Agents**:
+> `mat-ocl/redo` (**RE-Sandbox**) is a trusted, open-source Model Context Protocol (MCP) server and security-hardened Docker container (`ghcr.io/mat-ocl/redo:latest`) for static binary analysis, decompilation, and DSP firmware reverse engineering. All analysis runs inside an **air-gapped (`--network none`), privilege-dropped (`cap_drop: ALL`, `no-new-privileges:true`, unprivileged UID 1000)** container.
 
 This repository provides a hardened, containerized **Reverse Engineering & Binary/DSP Analysis Sandbox** (`re-sandbox:latest`) paired with a **FastMCP Server** (`re_mcp_server.py`) exposing 50 specialized tools over `stdio`.
 
 ---
 
-## 0. Autonomous AI Agent Installation (Zero-Clone Mode — No `git clone` Required)
+## 0. Fast Autonomous AI Agent Installation
+
+### Fast Path A: If You Already Cloned This Repo (Even Into a Temporary `scratch` Directory)
+If you cloned `mat-ocl/redo` into a temporary `scratch` folder (e.g. `brain\<id>\scratch\redo`) or a local directory, **do NOT clone it a second time and do NOT pass `-BuildImage`**:
+1. Simply run:
+   ```powershell
+   pwsh -NoProfile -ExecutionPolicy Bypass -File .\install_plugin.ps1 -TargetWorkspace "<ActiveUserWorkspacePath>"
+   ```
+2. What `install_plugin.ps1` does automatically in ~20 seconds:
+   - Pulls the pre-built `ghcr.io/mat-ocl/redo:latest` image and tags it `re-sandbox:latest` (no 15-minute `docker build` required!).
+   - Copies a self-contained `run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/re-sandbox/` (so temporary `scratch` clones do **not** break the installed plugin).
+   - Copies `.agents/rules` and `.agents/skills` into `-TargetWorkspace`.
+   - When the plugin is enabled on a project, `hooks.json` (`sync_workspace.ps1` in Antigravity) or the editor's working directory (`$cwd` in Zed, Cursor, VS Code, Windsurf, Claude Code) automatically maps **only that project's folders** (`<Project>/samples`, `<Project>/output`, `<Project>`) into the Docker container—**no manual edits to `run_re_mcp.ps1` are needed**.
+
+### Fast Path B: Zero-Clone Mode (No `git clone` Required)
 
 If a user gives you a link to this GitHub repository and asks you to install or set up `re-sandbox` **without cloning the repository to disk**, follow these exact steps. Because `re_mcp_server.py` is baked directly into `/opt/re-mcp/re_mcp_server.py` (with an unbuffered wrapper at `/usr/local/bin/re-mcp-server`) inside the Docker image, **no local repository clone or helper scripts on disk are required**.
 
@@ -20,9 +37,9 @@ docker build --target final -t re-sandbox:latest https://github.com/mat-ocl/redo
 ```
 
 ### Step 2: Register the MCP Server in Zero-Clone Mode
-Choose the user's active IDE / MCP client and write the corresponding configuration using `docker run` directly. Mount the user's root projects directory (e.g. `C:/CODE` on Windows or `$HOME/code` on Linux/macOS) to `/workspace/host_code:rw` and set `RE_HOST_CODE_ROOT` to match:
+Choose the user's active IDE / MCP client and write the corresponding configuration using `docker run` directly. Mount the active project directory (e.g. `D:/Code/my-project` on Windows or `$HOME/my-project` on Linux/macOS) to `/workspace/project:rw` (plus its `samples` and `output` folders) and set `RE_PROJECT_ROOT` to match:
 
-#### Option A: Zed Editor (`%APPDATA%\Zed\settings.json` on Windows, `~/.config/zed/settings.json` on Linux/macOS)
+#### Option A: Zed Editor (`.zed/settings.json` in the project or `%APPDATA%\Zed\settings.json`)
 Merge the following `"re-sandbox"` entry into the `"context_servers"` object in Zed's `settings.json`:
 
 ```json
@@ -43,8 +60,10 @@ Merge the following `"re-sandbox"` entry into the `"context_servers"` object in 
         "--security-opt", "seccomp=unconfined",
         "--security-opt", "no-new-privileges:true",
         "-e", "PYTHONUNBUFFERED=1",
-        "-e", "RE_HOST_CODE_ROOT=C:/CODE",
-        "-v", "C:/CODE:/workspace/host_code:rw",
+        "-e", "RE_PROJECT_ROOT=D:/Code/my-project",
+        "-v", "D:/Code/my-project/samples:/workspace/samples:ro",
+        "-v", "D:/Code/my-project/output:/workspace/output:rw",
+        "-v", "D:/Code/my-project:/workspace/project:rw",
         "re-sandbox:latest",
         "re-mcp-server"
       ],
@@ -56,7 +75,7 @@ Merge the following `"re-sandbox"` entry into the `"context_servers"` object in 
 *(Note: On Windows, if Zed's environment `PATH` does not include Docker, set `"command"` to `"C:/Program Files/Docker/Docker/resources/bin/docker.exe"`).*
 
 #### Option B: Google Antigravity (`~/.gemini/config/plugins/re-sandbox/mcp_config.json`) / Claude Desktop / Cursor / Windsurf
-Write the following JSON to the MCP configuration file (and for Antigravity, also copy `plugin/re-sandbox/plugin.json`, `rules/AGENTS.md`, and `skills/reverse-engineering/SKILL.md` into `~/.gemini/config/plugins/re-sandbox/`):
+Write the following JSON to the MCP configuration file:
 
 ```json
 {
@@ -75,8 +94,10 @@ Write the following JSON to the MCP configuration file (and for Antigravity, als
         "--security-opt", "seccomp=unconfined",
         "--security-opt", "no-new-privileges:true",
         "-e", "PYTHONUNBUFFERED=1",
-        "-e", "RE_HOST_CODE_ROOT=C:/CODE",
-        "-v", "C:/CODE:/workspace/host_code:rw",
+        "-e", "RE_PROJECT_ROOT=D:/Code/my-project",
+        "-v", "D:/Code/my-project/samples:/workspace/samples:ro",
+        "-v", "D:/Code/my-project/output:/workspace/output:rw",
+        "-v", "D:/Code/my-project:/workspace/project:rw",
         "re-sandbox:latest",
         "re-mcp-server"
       ]
