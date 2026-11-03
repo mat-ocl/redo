@@ -162,7 +162,22 @@ From PowerShell inside the cloned repository directory (even if cloned into a te
 *(Only pass `.\install_plugin.ps1 -BuildImage` if you modified `Dockerfile` and want to recompile the 4-stage image locally from scratch instead of pulling `ghcr.io/mat-ocl/redo:latest`).*
 
 > [!TIP]
-> **Self-Contained Scratch Clone Support**: `install_plugin.ps1` copies `run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/re-sandbox/`. If an AI agent clones this repository into a temporary `scratch` folder to run `.\install_plugin.ps1`, it does **not** need to clone the repository a second time.
+> **Self-Contained Scratch Clone Support**: `install_plugin.ps1` copies `run_re_mcp.ps1`, `re_mcp_server.py`, `uninstall_plugin.ps1`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/re-sandbox/`. If an AI agent clones this repository into a temporary `scratch` folder to run `.\install_plugin.ps1`, it does **not** need to clone the repository a second time.
+
+### Uninstalling
+
+To remove the Antigravity plugin (`~/.gemini/config/plugins/re-sandbox`), clean up Zed's `context_servers.re-sandbox` entry, and stop any running `re-sandbox` containers:
+
+```powershell
+# From the repository:
+.\install_plugin.ps1 -Uninstall
+
+# Or from anywhere (even if the repository clone was deleted):
+& "$HOME\.gemini\config\plugins\re-sandbox\uninstall_plugin.ps1"
+
+# Also delete the ~4.3 GB local Docker images (re-sandbox:latest & ghcr.io/mat-ocl/redo:latest):
+.\install_plugin.ps1 -Uninstall -RemoveImage
+```
 
 ### 3. Configure MCP Clients
 
@@ -419,7 +434,8 @@ How each editor passes the active project directory to `run_re_mcp.ps1`:
 ├── re_mcp_server.py            # FastMCP server exposing 50 reverse-engineering, hex & DSP tools
 ├── run_re_mcp.ps1              # Portable Windows PowerShell MCP stdio launcher
 ├── run_re_mcp.sh               # Portable Linux / macOS / WSL Bash MCP stdio launcher
-├── install_plugin.ps1          # One-command installer for Antigravity, Zed & Docker build
+├── install_plugin.ps1          # One-command installer / uninstaller for Antigravity, Zed & Docker
+├── uninstall_plugin.ps1        # Standalone uninstaller (also copied into ~/.gemini/config/plugins/re-sandbox/)
 ├── install_zed.ps1             # Dedicated Zed Editor installer (updates %APPDATA%\Zed\settings.json & .zed/settings.json)
 ├── install_zed.sh              # Dedicated Zed Editor installer for Linux / macOS
 ├── entrypoint.sh               # Container entrypoint (privilege drop via gosu ubuntu)

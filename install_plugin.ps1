@@ -1,4 +1,6 @@
 param(
+    [switch]$Uninstall = $false,
+    [switch]$RemoveImage = $false,
     [switch]$BuildImage = $false,
     [switch]$PullImage = $false,
     [switch]$SkipImage = $false,
@@ -15,6 +17,16 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = $PSScriptRoot
 if (-not $RepoRoot) {
     $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
+}
+
+if ($Uninstall) {
+    $UninstallScript = Join-Path $RepoRoot "uninstall_plugin.ps1"
+    if (Test-Path $UninstallScript) {
+        & $UninstallScript -RemoveImage:$RemoveImage -SkipZed:$SkipZed -TargetWorkspace $TargetWorkspace -PluginDest $PluginDest
+        exit $LASTEXITCODE
+    } else {
+        throw "uninstall_plugin.ps1 not found at $UninstallScript"
+    }
 }
 
 $GhcrImage = "ghcr.io/mat-ocl/redo:latest"
@@ -75,9 +87,12 @@ if (Test-Path $PluginSource) {
     New-Item -ItemType Directory -Path $PluginDest -Force | Out-Null
     Copy-Item -Path (Join-Path $PluginSource "*") -Destination $PluginDest -Recurse -Force
 
-    # Always copy run_re_mcp.ps1 and re_mcp_server.py into the plugin directory so it can run self-contained
+    # Always copy run_re_mcp.ps1, re_mcp_server.py, and uninstall_plugin.ps1 into the plugin directory so it can run or uninstall self-contained
     Copy-Item -Path (Join-Path $RepoRoot "run_re_mcp.ps1") -Destination (Join-Path $PluginDest "run_re_mcp.ps1") -Force
     Copy-Item -Path (Join-Path $RepoRoot "re_mcp_server.py") -Destination (Join-Path $PluginDest "re_mcp_server.py") -Force
+    if (Test-Path (Join-Path $RepoRoot "uninstall_plugin.ps1")) {
+        Copy-Item -Path (Join-Path $RepoRoot "uninstall_plugin.ps1") -Destination (Join-Path $PluginDest "uninstall_plugin.ps1") -Force
+    }
 
     if ($IsTempClone) {
         $LauncherPath = (Join-Path $PluginDest "run_re_mcp.ps1") -replace "\\", "/"

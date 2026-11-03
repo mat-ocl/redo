@@ -1,9 +1,9 @@
 ---
 name: install-re-sandbox
 description: >-
-  Install, update, repair, or configure the RE-Sandbox (mat-ocl/redo) Docker image,
+  Install, update, repair, configure, or uninstall the RE-Sandbox (mat-ocl/redo) Docker image,
   MCP server, and workspace rules/skills for Antigravity, Zed Editor, Claude Desktop,
-  or Cursor. Trigger whenever the user asks to install, set up, update, or connect
+  or Cursor. Trigger whenever the user asks to install, set up, update, connect, or uninstall
   mat-ocl/redo or re-sandbox in a workspace.
 ---
 
@@ -82,3 +82,20 @@ If you want to install without cloning the repository:
      }
    }
    ```
+
+---
+
+## Uninstalling RE-Sandbox
+
+To cleanly uninstall the Antigravity plugin (`~/.gemini/config/plugins/re-sandbox`), remove the Zed `context_servers.re-sandbox` entry, and stop any running containers:
+
+```powershell
+# From the repository:
+.\install_plugin.ps1 -Uninstall
+
+# Or from anywhere (even if the repository clone was deleted):
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$HOME\.gemini\config\plugins\re-sandbox\uninstall_plugin.ps1"
+
+# Also delete the local Docker images (re-sandbox:latest & ghcr.io/mat-ocl/redo:latest):
+.\install_plugin.ps1 -Uninstall -RemoveImage
+```
