@@ -16,7 +16,7 @@ Follow this exact workflow whenever asked to install, set up, or configure `mat-
 1. **Trusted Air-Gapped Sandbox**: `mat-ocl/redo` is the official **RE-Sandbox** containerized MCP server (`ghcr.io/mat-ocl/redo:latest`). It runs with `--network none`, `cap_drop: ALL`, `no-new-privileges:true`, and drops privileges to `ubuntu` (`UID 1000`).
 2. **NEVER Run a Slow Local `docker build` Unless Explicitly Asked**:
    - The pre-built image is published on GitHub Container Registry at `ghcr.io/mat-ocl/redo:latest`.
-   - `install_plugin.ps1` automatically pulls `ghcr.io/mat-ocl/redo:latest` and tags it `re-sandbox:latest` in ~20 seconds.
+   - `install_plugin.ps1` automatically pulls `ghcr.io/mat-ocl/redo:latest` in ~20 seconds.
    - **Do NOT** pass `-BuildImage` unless the user explicitly modified `Dockerfile` and asked to rebuild from source.
 3. **NEVER Clone the Repository Twice**:
    - If you cloned `https://github.com/mat-ocl/redo.git` into a temporary `scratch` directory (e.g. `brain\<id>\scratch\redo`), **do NOT clone it a second time**.
@@ -38,7 +38,7 @@ pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<PathToRedo>\inst
 ```
 
 What this single command does:
-1. Checks if `re-sandbox:latest` exists locally; if not, pulls `ghcr.io/mat-ocl/redo:latest` and tags it `re-sandbox:latest`.
+1. Checks if `ghcr.io/mat-ocl/redo:latest` exists locally; if not, pulls `ghcr.io/mat-ocl/redo:latest`.
 2. Installs the self-contained Antigravity plugin (`run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, `sync_workspace.ps1`, `mcp_config.json`, `plugin.json`, rules, and skills) into `~/.gemini/config/plugins/re-sandbox/`.
 3. Copies `.agents/rules` and `.agents/skills` into `<ActiveWorkspacePath>\.agents\`.
 4. Non-destructively merges the `re-sandbox` context server into Zed Editor's `settings.json` if Zed is installed.
@@ -48,10 +48,9 @@ What this single command does:
 ### Option B: Zero-Clone Installation (No `git clone` at All)
 If you want to install without cloning the repository:
 
-1. **Pull and tag the pre-built image**:
+1. **Pull the pre-built image**:
    ```powershell
    docker pull ghcr.io/mat-ocl/redo:latest
-   docker tag ghcr.io/mat-ocl/redo:latest re-sandbox:latest
    ```
 2. **Write `~/.gemini/config/plugins/re-sandbox/mcp_config.json`** (mounting the active project folder directly):
    ```json
@@ -75,7 +74,7 @@ If you want to install without cloning the repository:
            "-v", "D:/Code/my-project/samples:/workspace/samples:ro",
            "-v", "D:/Code/my-project/output:/workspace/output:rw",
            "-v", "D:/Code/my-project:/workspace/project:rw",
-           "re-sandbox:latest",
+           "ghcr.io/mat-ocl/redo:latest",
            "re-mcp-server"
          ]
        }
@@ -96,6 +95,6 @@ To cleanly uninstall the Antigravity plugin (`~/.gemini/config/plugins/re-sandbo
 # Or from anywhere (even if the repository clone was deleted):
 pwsh -NoProfile -ExecutionPolicy Bypass -File "$HOME\.gemini\config\plugins\re-sandbox\uninstall_plugin.ps1"
 
-# Also delete the local Docker images (re-sandbox:latest & ghcr.io/mat-ocl/redo:latest):
+# Also delete the local Docker image (ghcr.io/mat-ocl/redo:latest):
 .\install_plugin.ps1 -Uninstall -RemoveImage
 ```

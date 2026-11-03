@@ -2,7 +2,7 @@
 
 [![Build & Publish Docker Image](https://github.com/mat-ocl/redo/actions/workflows/docker-image.yml/badge.svg)](https://github.com/mat-ocl/redo/actions/workflows/docker-image.yml)
 
-**RE-Sandbox** (`re-sandbox:latest`) is a hardened, air-gapped Docker environment and **Model Context Protocol (MCP)** server (`re_mcp_server.py`) that equips AI coding agents (Antigravity, Zed, Claude Code, Cursor, Windsurf, VS Code) and human analysts with **50 specialized reverse-engineering, binary triage, decompilation, hex conversion, and DSP analysis tools**.
+**RE-Sandbox** (`ghcr.io/mat-ocl/redo:latest`) is a hardened, air-gapped Docker environment and **Model Context Protocol (MCP)** server (`re_mcp_server.py`) that equips AI coding agents (Antigravity, Zed, Claude Code, Cursor, Windsurf, VS Code) and human analysts with **50 specialized reverse-engineering, binary triage, decompilation, hex conversion, and DSP analysis tools**.
 
 ---
 
@@ -31,7 +31,7 @@ flowchart LR
         Output["<ActiveProject>/output/\n(/workspace/output:rw)"]
     end
 
-    subgraph Container["Docker Container (re-sandbox:latest, --network none)"]
+    subgraph Container["Docker Container (ghcr.io/mat-ocl/redo:latest, --network none)"]
         MCP["FastMCP Server\n(/opt/re-mcp/re_mcp_server.py)"]
         Native["Native & C++\nGhidra 12.2, Radare2, DIE, capa, FLOSS, YARA, RTTI/VTables"]
         DSP["DSP, Hex & Firmware\ndsp56300-disasm, dsp56300-asm, binhexconv, binwalk, unsquashfs"]
@@ -67,12 +67,11 @@ Because `re_mcp_server.py` is baked directly into `/opt/re-mcp/re_mcp_server.py`
 
 #### Step 1: Pull the Pre-Built GHCR Image (Fastest) or Build Directly from GitHub
 ```bash
-# Option A: Pull the pre-built image from GitHub Container Registry (GHCR) and tag locally:
+# Option A: Pull the pre-built image from GitHub Container Registry (GHCR):
 docker pull ghcr.io/mat-ocl/redo:latest
-docker tag ghcr.io/mat-ocl/redo:latest re-sandbox:latest
 
 # Option B: Or build directly from the remote GitHub URL (no local git clone needed):
-docker build --target final -t re-sandbox:latest https://github.com/mat-ocl/redo.git
+docker build --target final -t ghcr.io/mat-ocl/redo:latest https://github.com/mat-ocl/redo.git
 ```
 
 #### Step 2: Configure Your Editor / MCP Client (Zero-Clone Direct Docker)
@@ -101,7 +100,7 @@ Mount your project directory (e.g. `D:/Code/my-project` on Windows or `/home/use
           "-v", "D:/Code/my-project/samples:/workspace/samples:ro",
           "-v", "D:/Code/my-project/output:/workspace/output:rw",
           "-v", "D:/Code/my-project:/workspace/project:rw",
-          "re-sandbox:latest",
+          "ghcr.io/mat-ocl/redo:latest",
           "re-mcp-server"
         ],
         "env": {}
@@ -132,7 +131,7 @@ Mount your project directory (e.g. `D:/Code/my-project` on Windows or `/home/use
           "-v", "D:/Code/my-project/samples:/workspace/samples:ro",
           "-v", "D:/Code/my-project/output:/workspace/output:rw",
           "-v", "D:/Code/my-project:/workspace/project:rw",
-          "re-sandbox:latest",
+          "ghcr.io/mat-ocl/redo:latest",
           "re-mcp-server"
         ]
       }
@@ -175,7 +174,7 @@ To remove the Antigravity plugin (`~/.gemini/config/plugins/re-sandbox`), clean 
 # Or from anywhere (even if the repository clone was deleted):
 & "$HOME\.gemini\config\plugins\re-sandbox\uninstall_plugin.ps1"
 
-# Also delete the ~4.3 GB local Docker images (re-sandbox:latest & ghcr.io/mat-ocl/redo:latest):
+# Also delete the ~4.3 GB local Docker image (ghcr.io/mat-ocl/redo:latest):
 .\install_plugin.ps1 -Uninstall -RemoveImage
 ```
 

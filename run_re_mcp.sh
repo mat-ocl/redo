@@ -3,18 +3,15 @@ set -euo pipefail
 
 # 1. Resolve repository root (directory containing this script)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_NAME="${RE_IMAGE_NAME:-re-sandbox:latest}"
+IMAGE_NAME="${RE_IMAGE_NAME:-ghcr.io/mat-ocl/redo:latest}"
 
 PLUGIN_STATE_DIR="${HOME}/.gemini/config/plugins/re-sandbox"
 ACTIVE_WORKSPACE_FILE="${PLUGIN_STATE_DIR}/active_workspace.txt"
 
-# 2. Ensure re-sandbox:latest exists locally; auto-pull from GHCR on stderr if missing
+# 2. Ensure ghcr.io/mat-ocl/redo:latest exists locally; auto-pull from GHCR on stderr if missing
 if ! docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
-    GHCR_IMAGE="ghcr.io/mat-ocl/redo:latest"
-    echo "[*] Local image '${IMAGE_NAME}' not found. Pulling pre-built '${GHCR_IMAGE}'..." >&2
-    if docker pull "${GHCR_IMAGE}" >&2; then
-        docker tag "${GHCR_IMAGE}" "${IMAGE_NAME}" >&2
-    fi
+    echo "[*] Local image '${IMAGE_NAME}' not found. Pulling '${IMAGE_NAME}'..." >&2
+    docker pull "${IMAGE_NAME}" >&2 || true
 fi
 
 # 3. Resolve active project directory:

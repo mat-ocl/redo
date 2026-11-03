@@ -18,14 +18,14 @@ $LauncherPath = "${NormRepoRoot}/run_re_mcp.ps1"
 
 # 1. Optionally build the Docker image
 if ($BuildImage) {
-    Write-Host "[*] Building Docker image 're-sandbox:latest' from $RepoRoot..." -ForegroundColor Cyan
+    Write-Host "[*] Building Docker image 'ghcr.io/mat-ocl/redo:latest' from $RepoRoot..." -ForegroundColor Cyan
     Push-Location $RepoRoot
     try {
         & docker compose --profile static build
         if ($LASTEXITCODE -ne 0) {
             throw "Docker build failed with exit code $LASTEXITCODE"
         }
-        Write-Host "[+] Docker image 're-sandbox:latest' built successfully." -ForegroundColor Green
+        Write-Host "[+] Docker image 'ghcr.io/mat-ocl/redo:latest' built successfully." -ForegroundColor Green
     } finally {
         Pop-Location
     }
@@ -54,7 +54,7 @@ if ($Mode -eq "docker") {
         "-v", "${NormRepoRoot}/samples:/workspace/samples:ro",
         "-v", "${NormRepoRoot}/output:/workspace/output:rw",
         "-v", "${NormRepoRoot}:/workspace/project:rw",
-        "re-sandbox:latest",
+        "ghcr.io/mat-ocl/redo:latest",
         "re-mcp-server"
     )
 

@@ -29,34 +29,32 @@ if ($Uninstall) {
     }
 }
 
-$GhcrImage = "ghcr.io/mat-ocl/redo:latest"
-$LocalImage = "re-sandbox:latest"
+$ImageName = "ghcr.io/mat-ocl/redo:latest"
 
-# 1. Ensure Docker image 're-sandbox:latest' is available (prefers fast GHCR pull unless -BuildImage is passed)
+# 1. Ensure Docker image 'ghcr.io/mat-ocl/redo:latest' is available (prefers fast GHCR pull unless -BuildImage is passed)
 if (-not $SkipImage) {
     if ($BuildImage) {
-        Write-Host "[*] Building Docker image '$LocalImage' from $RepoRoot..." -ForegroundColor Cyan
+        Write-Host "[*] Building Docker image '$ImageName' from $RepoRoot..." -ForegroundColor Cyan
         Push-Location $RepoRoot
         try {
             & docker compose --profile static build
             if ($LASTEXITCODE -ne 0) {
                 throw "Docker build failed with exit code $LASTEXITCODE"
             }
-            Write-Host "[+] Docker image '$LocalImage' built successfully." -ForegroundColor Green
+            Write-Host "[+] Docker image '$ImageName' built successfully." -ForegroundColor Green
         } finally {
             Pop-Location
         }
     } else {
-        & docker image inspect $LocalImage *> $null
+        & docker image inspect $ImageName *> $null
         $imageExists = ($LASTEXITCODE -eq 0)
         if (-not $imageExists -or $PullImage) {
-            Write-Host "[*] Pulling pre-built Docker image '$GhcrImage' from GitHub Container Registry..." -ForegroundColor Cyan
-            & docker pull $GhcrImage
+            Write-Host "[*] Pulling pre-built Docker image '$ImageName' from GitHub Container Registry..." -ForegroundColor Cyan
+            & docker pull $ImageName
             if ($LASTEXITCODE -eq 0) {
-                & docker tag $GhcrImage $LocalImage
-                Write-Host "[+] Pulled '$GhcrImage' and tagged as '$LocalImage'." -ForegroundColor Green
+                Write-Host "[+] Pulled '$ImageName' successfully." -ForegroundColor Green
             } else {
-                Write-Host "[!] GHCR pull unavailable or image private; falling back to local Docker build..." -ForegroundColor Yellow
+                Write-Host "[!] GHCR pull unavailable; falling back to local Docker build..." -ForegroundColor Yellow
                 Push-Location $RepoRoot
                 try {
                     & docker compose --profile static build
@@ -68,7 +66,7 @@ if (-not $SkipImage) {
                 }
             }
         } else {
-            Write-Host "[+] Docker image '$LocalImage' is already present locally." -ForegroundColor Green
+            Write-Host "[+] Docker image '$ImageName' is already present locally." -ForegroundColor Green
         }
     }
 }

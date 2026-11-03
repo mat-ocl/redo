@@ -1,6 +1,6 @@
 param(
     [string]$ProjectDir = "",
-    [string]$ImageName = "re-sandbox:latest"
+    [string]$ImageName = "ghcr.io/mat-ocl/redo:latest"
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,15 +26,11 @@ if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) {
     }
 }
 
-# 2b. Ensure re-sandbox:latest image exists locally; auto-pull from GHCR on stderr if missing
+# 2b. Ensure ghcr.io/mat-ocl/redo:latest image exists locally; auto-pull from GHCR on stderr if missing
 & $DockerCmd image inspect $ImageName *> $null
 if ($LASTEXITCODE -ne 0) {
-    $GhcrImage = "ghcr.io/mat-ocl/redo:latest"
-    [Console]::Error.WriteLine("[*] Local image '$ImageName' not found. Pulling pre-built '$GhcrImage'...")
-    & $DockerCmd pull $GhcrImage 1>&2
-    if ($LASTEXITCODE -eq 0) {
-        & $DockerCmd tag $GhcrImage $ImageName 1>&2
-    }
+    [Console]::Error.WriteLine("[*] Local image '$ImageName' not found. Pulling '$ImageName'...")
+    & $DockerCmd pull $ImageName 1>&2
 }
 
 # 3. Resolve active project directory:

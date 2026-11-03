@@ -96,7 +96,7 @@ if ($RemoveImage) {
     & docker rmi -f $LocalImage $GhcrImage 2>$null
     Write-Host "[+] Docker images removed." -ForegroundColor Green
 } else {
-    Write-Host "[i] Docker image '$LocalImage' was kept cached locally (pass -RemoveImage to delete the ~4.3 GB image)." -ForegroundColor Yellow
+    Write-Host "[i] Docker image '$GhcrImage' was kept cached locally (pass -RemoveImage to delete the ~4.3 GB image)." -ForegroundColor Yellow
 }
 
 Write-Host "[+] RE-Sandbox uninstall complete." -ForegroundColor Green

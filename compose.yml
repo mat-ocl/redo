@@ -8,7 +8,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: final
-    image: re-sandbox:latest
+    image: ghcr.io/mat-ocl/redo:latest
     profiles:
       - static
     container_name: re-static-analysis
@@ -49,7 +49,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: final
-    image: re-sandbox:latest
+    image: ghcr.io/mat-ocl/redo:latest
     profiles:
       - dynamic
     container_name: re-dynamic-analysis
