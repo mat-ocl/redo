@@ -111,10 +111,10 @@ Write the following JSON to the MCP configuration file:
 ## 1. Repository Architecture
 
 - **`Dockerfile`**: 4-stage Ubuntu 24.04 build:
-  1. `downloader`: Fetches Ghidra Headless (`11.2`), JADX (`1.5.0`), Apktool (`2.10.0`), Mandiant `capa` (`8.0.1`) + rules, Mandiant `GoReSym` (`3.0.1`), Detect-It-Easy CLI (`diec` `3.21`), and Community YARA rules.
+  1. `downloader`: Fetches Ghidra Headless (`12.2`), JADX (`1.5.6`), Apktool (`3.0.3`), Mandiant `capa` (`10.0.0`) + rules, Mandiant `GoReSym` (`3.4.1`), Detect-It-Easy CLI (`diec` `3.21`), and Community YARA rules.
   2. `cpp-builder`: Compiles Radare2 (`/opt/radare2`), Decompyle++ (`pycdc` / `pycdas` in `/opt/pycdc`), `BinHexConv` (`binhexconv` / `bin2hext` from `mat-ocl/binhexconv` in `/opt/binhexconv/bin`), and the **Motorola DSP56300** toolchain (`dsp56300-disasm` & `dsp56300-asm` from `xemu-project/dsp56300` in `/opt/dsp56300/bin`).
   3. `python-builder`: Creates `/opt/re-venv` with `mcp[cli]`, `flare-floss`, `frida-tools`, `pyinstxtractor-ng`, `lief`, `pefile`, `pyelftools`, `r2pipe`, `yara-python`, and `capstone`.
-  4. `final`: Hardened runtime image with Java 21, .NET 8 SDK (`ilspycmd`), Node.js 22 (`asar`, `synchrony`, `deobfuscator`, `js-beautify`, `rea`), WABT/Binaryen (`wasm-decompile`, `wasm2wat`), `binwalk`, `upx`, `7z`, `innoextract`, `unsquashfs`, `gdb-multiarch`, `lldb`, `strace`, `ltrace`, and `qemu-user`.
+  4. `final`: Hardened runtime image with OpenJDK 25, .NET 10 SDK (`ilspycmd` `11.2`), Node.js 24 LTS (`asar`, `synchrony`, `deobfuscator`, `js-beautify`, `rea`), WABT/Binaryen (`wasm-decompile`, `wasm2wat`), `binwalk`, `upx`, `7z`, `innoextract`, `unsquashfs`, `gdb-multiarch`, `lldb`, `strace`, `ltrace`, and `qemu-user`.
 - **`compose.yml`**: Defines two security-hardened profiles:
   - `static` (`re-static`): Air-gapped (`network_mode: none`), `read_only: true` root filesystem, `cap_drop: ALL`.
   - `dynamic` (`re-dynamic`): Isolated internal bridge network, `SYS_PTRACE` enabled for `gdb`, `strace`, `ltrace`, and `qemu-user`.

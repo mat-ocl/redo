@@ -56,7 +56,7 @@ _SAFE_R2_TARGET_RE = re.compile(r"^[a-zA-Z0-9_.:+-]+$")
 _SAFE_HEX_OR_INT_RE = re.compile(r"^(?:0[xX][0-9a-fA-F]+|[0-9]+)$")
 
 # =====================================================================
-# Embedded Ghidra Headless Java Scripts (Ghidra 11.x native OSGi)
+# Embedded Ghidra Headless Java Scripts (Ghidra 12.x native OSGi)
 # =====================================================================
 
 _GHIDRA_DECOMPILE_TARGET_JAVA = r"""

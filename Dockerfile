@@ -12,29 +12,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Ghidra Headless
-ARG GHIDRA_VER=11.2
-ARG GHIDRA_DATE=20240926
+ARG GHIDRA_VER=12.2
+ARG GHIDRA_DATE=20261016
 RUN wget -q "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VER}_build/ghidra_${GHIDRA_VER}_PUBLIC_${GHIDRA_DATE}.zip" -O /tmp/ghidra.zip \
     && unzip -q /tmp/ghidra.zip -d /opt \
     && mv /opt/ghidra_${GHIDRA_VER}_PUBLIC /opt/ghidra \
     && rm /tmp/ghidra.zip
 
 # JADX CLI
-ARG JADX_VER=1.5.0
+ARG JADX_VER=1.5.6
 RUN wget -q "https://github.com/skylot/jadx/releases/download/v${JADX_VER}/jadx-${JADX_VER}.zip" -O /tmp/jadx.zip \
     && mkdir -p /opt/jadx \
     && unzip -q /tmp/jadx.zip -d /opt/jadx \
     && rm /tmp/jadx.zip
 
 # Apktool Wrapper & Jar
-ARG APKTOOL_VER=2.10.0
+ARG APKTOOL_VER=3.0.3
 RUN mkdir -p /opt/apktool \
-    && curl -fsSL https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool -o /opt/apktool/apktool \
+    && curl -fsSL https://raw.githubusercontent.com/iBotPeaches/Apktool/main/scripts/linux/apktool -o /opt/apktool/apktool \
     && curl -fsSL "https://github.com/iBotPeaches/Apktool/releases/download/v${APKTOOL_VER}/apktool_${APKTOOL_VER}.jar" -o /opt/apktool/apktool.jar \
     && chmod +x /opt/apktool/apktool /opt/apktool/apktool.jar
 
 # Mandiant capa + rules
-ARG CAPA_VER=8.0.1
+ARG CAPA_VER=10.0.0
 RUN mkdir -p /opt/capa \
     && wget -q "https://github.com/mandiant/capa/releases/download/v${CAPA_VER}/capa-v${CAPA_VER}-linux.zip" -O /tmp/capa.zip \
     && unzip -q /tmp/capa.zip -d /opt/capa \
@@ -44,7 +44,7 @@ RUN mkdir -p /opt/capa \
     && rm -rf /opt/capa/rules/.git
 
 # Mandiant GoReSym (Go symbol & struct recovery)
-ARG GORESYM_VER=3.0.1
+ARG GORESYM_VER=3.4.1
 RUN mkdir -p /opt/goresym \
     && wget -q "https://github.com/mandiant/GoReSym/releases/download/v${GORESYM_VER}/GoReSym-linux.zip" -O /tmp/goresym.zip \
     && unzip -q /tmp/goresym.zip -d /opt/goresym \
@@ -162,9 +162,10 @@ RUN python3 -m venv /opt/re-venv \
 FROM ubuntu:24.04 AS final
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 \
+    JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64 \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
+    DOTNET_ROLL_FORWARD=Major \
     LD_LIBRARY_PATH="/opt/radare2/lib" \
     PATH="/opt/radare2/bin:/opt/re-venv/bin:/opt/dsp56300/bin:/opt/binhexconv/bin:/opt/jadx/bin:/opt/ghidra/support:/opt/apktool:/opt/capa:/opt/goresym:/opt/pycdc/bin:/opt/dotnet-tools:${PATH}"
 
@@ -196,19 +197,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libqt5core5t64 \
     libqt5script5 \
     python3 \
-    openjdk-21-jdk-headless \
-    dotnet-sdk-8.0 \
+    openjdk-25-jdk-headless \
+    dotnet-sdk-10.0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ILSpy CLI (ilspycmd 8.2.x targets .NET 8.0; 9.x+ requires .NET 9.0)
-RUN dotnet tool install --tool-path /opt/dotnet-tools ilspycmd --version 8.2.0.7535 \
+# Install ILSpy CLI (ilspycmd 11.2.x targets .NET 10.0)
+RUN dotnet tool install --tool-path /opt/dotnet-tools ilspycmd --version 11.2.0.10050 \
     && chmod -R a+rx /opt/dotnet-tools \
     && rm -rf /root/.nuget /tmp/NuGetScratch
 
-# Install Node.js 22 LTS runtime and JS utilities
+# Install Node.js 24 LTS runtime and JS utilities
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g --omit=dev \

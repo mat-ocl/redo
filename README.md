@@ -10,7 +10,7 @@
 
 - **Air-Gapped & Privilege-Dropped Execution**: Runs with `--network none`, `cap_drop: ALL`, `no-new-privileges:true`, a read-only `/workspace/samples` mount, and drops root privileges to unprivileged user `ubuntu` (`UID 1000`) via `gosu`.
 - **50 Turnkey MCP Tools**: Unified FastMCP server (`re_mcp_server.py`) covering Native PE/ELF/Mach-O, C++ RTTI/VTables, **Motorola DSP56300** 24-bit DSP ROMs, Binary/Hex-Text inspection & conversion (`BinHexConv`), .NET/C#, Android APK/DEX, Python/PyInstaller, Go, WebAssembly, Electron ASAR/JS, Firmware/Installers, and Dynamic Tracing.
-- **Persistent Ghidra 11.2 Headless Cache**: Automatically fingerprints binaries into `<project>/output/ghidra_cache/` so subsequent `ghidra_decompile_function` calls execute in ~3–5 seconds, plus a `fast_mode=True` option that decompiles functions in 20MB+ C++ binaries in ~8 seconds without waiting for full-program auto-analysis.
+- **Persistent Ghidra 12.2 Headless Cache**: Automatically fingerprints binaries into `<project>/output/ghidra_cache/` so subsequent `ghidra_decompile_function` calls execute in ~3–5 seconds, plus a `fast_mode=True` option that decompiles functions in 20MB+ C++ binaries in ~8 seconds without waiting for full-program auto-analysis.
 - **Motorola DSP56300 Toolchain (`dsp56300-disasm` & `dsp56300-asm`)**: Native support for disassembling and assembling 24-bit Motorola/Freescale/NXP DSP56300 code (`u24be`, `u24le`, `u32le`, `u32be`, `u24be_swap16`) including direct byte-offset slicing from larger firmware or host binaries.
 - **LLM-Friendly Binary Hex Inspection & Conversion (`BinHexConv` / `bin2hext`)**: Built-in `binary_hex_dump` (with wildcard hex pattern search `F0 43 ??`, canonical hex+ASCII, and `u24be` 24-bit DSP word tables) and `binary_hex_convert` (powered by [`mat-ocl/binhexconv`](https://github.com/mat-ocl/binhexconv)) for converting binary/SysEx/ROM files to hexadecimal text and back.
 - **Automatic Per-Project Folder Mapping**: When enabled on a project (via Antigravity's `SessionStart`/`PreInvocation` plugin hook or per-project working directory in Zed, Cursor, VS Code, Windsurf, and Claude Code), `run_re_mcp.ps1` mounts **only** that active project's folders (`<Project>/samples` &rarr; `/workspace/samples:ro`, `<Project>/output` &rarr; `/workspace/output:rw`, `<Project>` &rarr; `/workspace/project:rw`) into the container.
@@ -33,7 +33,7 @@ flowchart LR
 
     subgraph Container["Docker Container (re-sandbox:latest, --network none)"]
         MCP["FastMCP Server\n(/opt/re-mcp/re_mcp_server.py)"]
-        Native["Native & C++\nGhidra 11.2, Radare2, DIE, capa, FLOSS, YARA, RTTI/VTables"]
+        Native["Native & C++\nGhidra 12.2, Radare2, DIE, capa, FLOSS, YARA, RTTI/VTables"]
         DSP["DSP, Hex & Firmware\ndsp56300-disasm, dsp56300-asm, binhexconv, binwalk, unsquashfs"]
         Managed["Managed & Web\nilspycmd, JADX, Apktool, pycdc, GoReSym, WABT, ASAR"]
         Dynamic["Dynamic & Debug\ngdb-multiarch, lldb, strace, ltrace, qemu-user"]
@@ -268,7 +268,7 @@ Add the following entry to your MCP configuration file (`claude_desktop_config.j
 | `diec_detect` | Detect-It-Easy (`diec` 3.21) | Deep compiler, linker, protector (VMProtect, Themida, UPX), and section entropy scan. |
 | `pe_elf_headers` | `pefile`, `pyelftools`, `rabin2`, `osslsigncode` | Inspect PE/ELF sections with Shannon entropy, exports, TLS callbacks, PE resource tables, overlays, and Authenticode signatures. |
 | `yara_scan` | `yara` + DIE & Community Rules | Scan binaries against built-in rule packs (`all_die`, `peid`, `packer`, `crypto`, `malware`, `community_packers`, `community_crypto`) or custom `.yar` files. |
-| `capa_detect_capabilities` | Mandiant `capa` 8.0.1 | Identify program capabilities mapped to MITRE ATT&CK and MBC with function addresses. |
+| `capa_detect_capabilities` | Mandiant `capa` 10.0.0 | Identify program capabilities mapped to MITRE ATT&CK and MBC with function addresses. |
 | `floss_extract_strings` | Mandiant `floss` | Recover obfuscated stack strings, tight strings, decoded strings, and static strings. |
 
 ### 3. C++ RTTI/VTables & Motorola DSP56300
@@ -278,13 +278,13 @@ Add the following entry to your MCP configuration file (`claude_desktop_config.j
 | `dsp56300_disassemble` | `dsp56300-disasm` | Disassemble Motorola DSP56300 24-bit program memory (`u24be`, `u24le`, `u32le`, `u32be`, `u24be_swap16`) with start address (`-s`), instruction count (`-n`), and embedded binary slicing (`byte_offset`/`byte_length`). |
 | `dsp56300_assemble` | `dsp56300-asm` | Assemble Motorola DSP56300 assembly files or inline assembly strings into `u24be`, `u24le`, `u32le`, or `.lod` format. |
 
-### 4. Native Disassembly & Decompilation (Radare2 & Ghidra 11.2 Headless)
+### 4. Native Disassembly & Decompilation (Radare2 & Ghidra 12.2 Headless)
 | MCP Tool | Underlying Engine | Description |
 | :--- | :--- | :--- |
-| `ghidra_decompile_function` | Ghidra 11.2 Headless | Decompile a single function (by name or hex address) into C pseudocode. Uses persistent project caching and supports `fast_mode=True` (~8s on large C++ binaries). |
-| `ghidra_list_functions` | Ghidra 11.2 Headless | List discovered functions, sizes, and C prototypes from the cached Ghidra project. |
-| `ghidra_decompile_all` | Ghidra 11.2 Headless | Decompile all non-thunk functions in a binary into a single searchable `.c` file in `output/`. |
-| `ghidra_headless_analyze` | Ghidra 11.2 Headless | Run custom Ghidra headless analysis with optional `-processor` (e.g. `DSP56300:BE:24:default`), `-loader`, `-baseAddr`, and custom Java/Python post-scripts. |
+| `ghidra_decompile_function` | Ghidra 12.2 Headless | Decompile a single function (by name or hex address) into C pseudocode. Uses persistent project caching and supports `fast_mode=True` (~8s on large C++ binaries). |
+| `ghidra_list_functions` | Ghidra 12.2 Headless | List discovered functions, sizes, and C prototypes from the cached Ghidra project. |
+| `ghidra_decompile_all` | Ghidra 12.2 Headless | Decompile all non-thunk functions in a binary into a single searchable `.c` file in `output/`. |
+| `ghidra_headless_analyze` | Ghidra 12.2 Headless | Run custom Ghidra headless analysis with optional `-processor` (e.g. `DSP56300:BE:24:default`), `-loader`, `-baseAddr`, and custom Java/Python post-scripts. |
 | `r2_binary_info` | `rabin2 -I -j` | Architecture, endianness, relocations, and binary security mitigations. |
 | `r2_imports_exports_sections` | `rabin2 -S -i -E` | List sections, imported APIs, and exported functions. |
 | `r2_strings` | `rabin2 -z / -zz` | Extract strings with virtual addresses and regex filtering. |
@@ -297,16 +297,16 @@ Add the following entry to your MCP configuration file (`claude_desktop_config.j
 ### 5. Managed Runtimes, Bytecode, WebAssembly & Electron
 | MCP Tool | Underlying Engine | Description |
 | :--- | :--- | :--- |
-| `dotnet_list_types` | `ilspycmd` 8.2 | List all namespaces, classes, interfaces, structs, and enums in a .NET assembly. |
-| `dotnet_decompile` | `ilspycmd` 8.2 | Decompile a specific .NET class or dump an entire C# Visual Studio project to `output/`. |
-| `jadx_extract_manifest` | `jadx` 1.5.0 | Decode `AndroidManifest.xml` from an APK. |
-| `jadx_list_classes` | `jadx` 1.5.0 | Decompile APK/DEX/JAR (cached in `output/`) and list all Java/Kotlin classes. |
-| `jadx_decompile_class` | `jadx` 1.5.0 | Return decompiled Java source for a single class FQN. |
-| `jadx_decompile_all_and_search` | `jadx` 1.5.0 | Decompile entire APK/DEX/JAR and regex-search across all Java/XML sources. |
-| `apktool_decode` | `apktool` 2.10.0 | Decode APK resources and Smali disassembly into `output/`. |
+| `dotnet_list_types` | `ilspycmd` 11.2 | List all namespaces, classes, interfaces, structs, and enums in a .NET assembly. |
+| `dotnet_decompile` | `ilspycmd` 11.2 | Decompile a specific .NET class or dump an entire C# Visual Studio project to `output/`. |
+| `jadx_extract_manifest` | `jadx` 1.5.6 | Decode `AndroidManifest.xml` from an APK. |
+| `jadx_list_classes` | `jadx` 1.5.6 | Decompile APK/DEX/JAR (cached in `output/`) and list all Java/Kotlin classes. |
+| `jadx_decompile_class` | `jadx` 1.5.6 | Return decompiled Java source for a single class FQN. |
+| `jadx_decompile_all_and_search` | `jadx` 1.5.6 | Decompile entire APK/DEX/JAR and regex-search across all Java/XML sources. |
+| `apktool_decode` | `apktool` 3.0.3 | Decode APK resources and Smali disassembly into `output/`. |
 | `pyinstaller_extract_and_decompile` | `pyinstxtractor-ng` + `pycdc` | Unpack PyInstaller executables and automatically decompile entrypoint `.pyc` files. |
 | `pyc_decompile` | `pycdc` / `pycdas` | Decompile Python `.pyc` bytecode to Python source (with `pycdas` bytecode fallback). |
-| `go_extract_symbols` | Mandiant `GoReSym` 3.0.1 | Recover Go compiler metadata, package paths, user function addresses, and struct types from stripped Go binaries. |
+| `go_extract_symbols` | Mandiant `GoReSym` 3.4.1 | Recover Go compiler metadata, package paths, user function addresses, and struct types from stripped Go binaries. |
 | `wasm_decompile` | WABT (`wasm-decompile`, `wasm2wat`, `wasm-objdump`) | Decompile `.wasm` binaries into C-like pseudocode, WAT text format, or section headers. |
 | `asar_list` / `asar_extract` | `@electron/asar` | Inspect or extract Electron `.asar` application bundles. |
 | `js_beautify_file` / `js_deobfuscate` | `js-beautify`, `synchrony`, `deobfuscator` | Format minified JavaScript or deobfuscate packed JS bundles. |
