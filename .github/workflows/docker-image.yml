@@ -23,6 +23,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  NODE_OPTIONS: --no-deprecation
 
 permissions:
   contents: read
@@ -115,6 +116,6 @@ jobs:
             set -e
             echo '[*] Verifying installed RE & DSP toolchains...'
             which r2 rabin2 ghidra-headless jadx apktool capa GoReSym diec ilspycmd dsp56300-disasm binhexconv bin2hext re-mcp-server
-            python3 -m py_compile /opt/re-mcp/re_mcp_server.py
+            /opt/re-venv/bin/python3 -B -c \"import importlib.util; spec = importlib.util.spec_from_file_location('re_mcp_server', '/opt/re-mcp/re_mcp_server.py'); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); print('[+] MCP server module loaded cleanly')\"
             echo '[+] All toolchains and MCP server verified!'
           "
