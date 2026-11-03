@@ -351,7 +351,7 @@ def _get_output_dir(target: Optional[Path] = None) -> Path:
 def _validate_path(file_path: str) -> Path:
     """
     Validate that the target path exists and stays within allowed workspace/tmp boundaries.
-    Automatically translates host paths (e.g. C:\\CODE\\...).
+    Automatically translates active project paths.
     """
     target = _translate_host_path(file_path)
     if not (_is_within(target, WORKSPACE_DIR) or _is_within(target, TMP_DIR)):
@@ -415,10 +415,10 @@ def _require_tool(binary_name: str) -> str:
 def list_workspace_files(subdir: str = "") -> str:
     """
     List files available in the active project or /workspace.
-    `subdir` can be a relative subdirectory (e.g. 'samples' or 'output') OR a host project
-    path (e.g. 'C:/CODE/MyProject' or 'C:/CODE/MyProject/samples').
+    `subdir` can be a relative subdirectory (e.g. 'samples', 'output', 'drivers') OR a path
+    inside the active project.
     """
-    base = _translate_host_path(subdir) if subdir else WORKSPACE_DIR
+    base = _translate_host_path(subdir)
     if not _is_within(base, WORKSPACE_DIR):
         raise ValueError("Directory must remain within /workspace.")
     if not base.exists():
@@ -439,7 +439,7 @@ def list_workspace_files(subdir: str = "") -> str:
 def read_workspace_file(file_path: str, start_line: int = 1, max_lines: int = 250) -> str:
     """
     Read lines from a text file (e.g. decompiled C/Java/C#/Python source, DSP56300 assembly,
-    manifest, JS) in /workspace, a host C:\\CODE\\... project path, or /tmp with line numbers.
+    manifest, JS) in the active project, /workspace, or /tmp with line numbers.
     """
     target = _validate_path(file_path)
     if target.is_dir():
@@ -461,8 +461,8 @@ def search_workspace_files(
     max_matches: int = 100
 ) -> str:
     """
-    Search across decompiled or extracted text files in `subdir` (can be 'output' or a
-    host project output path like 'C:/CODE/MyProject/output') using a regex.
+    Search across decompiled or extracted text files in `subdir` (defaults to 'output' in the
+    active project) using a regex.
     """
     base = _translate_host_path(subdir) if subdir else WORKSPACE_DIR
     if not _is_within(base, WORKSPACE_DIR):
@@ -495,8 +495,8 @@ def stage_file_from_base64(
     project_dir: Optional[str] = None
 ) -> str:
     """
-    Directly ingest and write a binary or archive into the workspace over the MCP connection
-    using Base64. Optionally pass `project_dir` (e.g. 'C:/CODE/MyProject') to stage into that project.
+    Directly ingest and write a binary or archive into the active project's staging directory
+    over the MCP connection using Base64.
     """
     staging_dir = _get_staging_dir(project_dir)
     dest_path = staging_dir / _safe_filename(filename)
@@ -513,7 +513,7 @@ def stage_text_file(
 ) -> str:
     """
     Directly write a script (JS, Python, C, shell, DSP56300 assembly, YARA rule, Ghidra post-script)
-    into the workspace for analysis. Optionally pass `project_dir` (e.g. 'C:/CODE/MyProject').
+    into the active project's staging directory for analysis.
     """
     staging_dir = _get_staging_dir(project_dir)
     dest_path = staging_dir / _safe_filename(filename)

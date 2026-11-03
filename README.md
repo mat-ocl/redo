@@ -24,21 +24,25 @@
 flowchart LR
     subgraph Host["Host Machine (Windows / macOS / Linux)"]
         Agent["AI Coding Agent\n(Antigravity / Zed / Claude / Cursor)"]
+        Hook["Plugin Hook / Editor cwd\n(sync_workspace.ps1 / $PWD)"]
         Launcher["run_re_mcp.ps1 / run_re_mcp.sh"]
-        Samples["<project>/samples/\n(Read-Only Input)"]
-        Output["<project>/output/\n(Read-Write Artifacts & Ghidra Cache)"]
+        Project["<ActiveProject>/\n(/workspace/project:rw)"]
+        Samples["<ActiveProject>/samples/\n(/workspace/samples:ro)"]
+        Output["<ActiveProject>/output/\n(/workspace/output:rw)"]
     end
 
     subgraph Container["Docker Container (re-sandbox:latest, --network none)"]
         MCP["FastMCP Server\n(/opt/re-mcp/re_mcp_server.py)"]
         Native["Native & C++\nGhidra 11.2, Radare2, DIE, capa, FLOSS, YARA, RTTI/VTables"]
-        DSP["DSP & Firmware\ndsp56300-disasm, dsp56300-asm, binwalk, unsquashfs"]
+        DSP["DSP, Hex & Firmware\ndsp56300-disasm, dsp56300-asm, binhexconv, binwalk, unsquashfs"]
         Managed["Managed & Web\nilspycmd, JADX, Apktool, pycdc, GoReSym, WABT, ASAR"]
         Dynamic["Dynamic & Debug\ngdb-multiarch, lldb, strace, ltrace, qemu-user"]
     end
 
     Agent <-->|"MCP stdio"| Launcher
+    Hook -.->|"Active Project Path"| Launcher
     Launcher <-->|"docker run -i --rm"| MCP
+    Project -.->|":rw mount"| MCP
     Samples -.->|":ro mount"| MCP
     MCP ==>|":rw mount"| Output
     MCP --> Native
@@ -52,8 +56,8 @@ flowchart LR
 ## Quick Start & Installation
 
 You can install and run **RE-Sandbox** in two ways:
-1. **Zero-Clone Mode (Recommended for AI Agents & Quick Setup)**: Build the self-contained image directly from the GitHub URL and run `re-mcp-server` straight from the container image—**no `git clone` or local scripts on disk required**.
-2. **Local Repository Mode (For Customizing Tools)**: Clone the repository locally and use `install_plugin.ps1` / `install_zed.ps1`, which bind-mounts `re_mcp_server.py` so edits take effect without rebuilding the image.
+1. **Zero-Clone Mode (For AI Agents & Direct Docker Setup)**: Pull the pre-built image from GHCR (or build directly from the GitHub URL) and run `re-mcp-server` straight from the container image—**no `git clone` or local scripts on disk required**.
+2. **Local Repository / Plugin Mode (Recommended)**: Run `install_plugin.ps1` / `install_zed.ps1` to install the self-contained plugin and workspace hooks that automatically mount whichever project you open.
 
 ---
 
@@ -158,12 +162,12 @@ From PowerShell inside the cloned repository directory (even if cloned into a te
 *(Only pass `.\install_plugin.ps1 -BuildImage` if you modified `Dockerfile` and want to recompile the 4-stage image locally from scratch instead of pulling `ghcr.io/mat-ocl/redo:latest`).*
 
 > [!TIP]
-> **Self-Contained Scratch Clone Support**: `install_plugin.ps1` copies `run_re_mcp.ps1` and `re_mcp_server.py` directly into `~/.gemini/config/plugins/re-sandbox/`. If an AI agent clones this repository into a temporary `scratch` folder to run `.\install_plugin.ps1`, it does **not** need to clone the repository a second time into `C:\CODE` or `D:\Code`.
+> **Self-Contained Scratch Clone Support**: `install_plugin.ps1` copies `run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/re-sandbox/`. If an AI agent clones this repository into a temporary `scratch` folder to run `.\install_plugin.ps1`, it does **not** need to clone the repository a second time.
 
 ### 3. Configure MCP Clients
 
 #### A. Google Antigravity IDE
-Running `.\install_plugin.ps1` automatically installs the `re-sandbox` plugin (including its MCP config, agent rules, and reverse-engineering skill) into `~/.gemini/config/plugins/re-sandbox`. You can toggle it on or off anytime from the Antigravity Plugins panel (`customization://re-sandbox`).
+Running `.\install_plugin.ps1` automatically installs the `re-sandbox` plugin (including its MCP config, `hooks.json` workspace sync hook, agent rules, and `reverse-engineering` / `install-re-sandbox` skills) into `~/.gemini/config/plugins/re-sandbox`. You can toggle it on or off anytime from the Antigravity Plugins panel (`customization://re-sandbox`).
 
 #### B. Zed Editor (Turnkey Installation)
 This repository includes a dedicated installer and workspace configuration for **Zed Editor**:
@@ -249,7 +253,7 @@ Add the following entry to your MCP configuration file (`claude_desktop_config.j
 ### 1. Workspace, File Staging & Binary/Hex-Text Conversion
 | MCP Tool | Description |
 | :--- | :--- |
-| `list_workspace_files` | List files in `/workspace`, `samples/`, `output/`, or a host project path (`C:/CODE/MyProject`). |
+| `list_workspace_files` | List files in the active project (`/workspace/project`), `samples/`, `output/`, or a relative subfolder. |
 | `read_workspace_file` | Read line ranges from decompiled source files (`.c`, `.java`, `.cs`, `.py`, `.asm`, `.js`) with line numbers. |
 | `search_workspace_files` | Regex search across all decompiled or extracted files in `output/`. |
 | `stage_file_from_base64` | Upload a binary or archive directly into the sandbox over MCP via Base64. |
@@ -338,7 +342,7 @@ Often, a firmware update or host binary embeds a DSP56300 program block at a spe
 ```python
 # Example MCP tool call:
 dsp56300_disassemble(
-    file_path="C:/CODE/MyProject/samples/firmware.bin",
+    file_path="samples/firmware.bin",
     word_format="u24be",
     start_addr="0x0100",
     byte_offset=0x14800,
@@ -347,6 +351,15 @@ dsp56300_disassemble(
     output_filename="dsp_routine.asm"
 )
 ```
+
+---
+
+## Binary Hex Inspection & Conversion (`BinHexConv`)
+
+LLMs cannot reliably read raw binary files (`.bin`, `.rom`, `.syx`) using standard text file readers without corrupting non-ASCII bytes. **RE-Sandbox** includes [`mat-ocl/binhexconv`](https://github.com/mat-ocl/binhexconv) (`bin2hext`) and two dedicated MCP tools for binary-to-hex analysis:
+
+- **`binary_hex_dump`**: Inspect any `[byte_offset, byte_length]` window of a binary file in `canonical` (`hexdump -C` offset + hex + ASCII), `u24be` (24-bit DSP56300 word tables with `P:$xxxx` addresses), `spaced`, `raw`, or `c_array` format, and search for wildcard byte patterns (e.g., `search_hex_pattern="F0 43 ?? 00"` for MIDI SysEx headers).
+- **`binary_hex_convert`**: Convert entire binary files or slices into hexadecimal text files in `output/` (`direction="bin_to_hex"`) and reconstruct binary files from edited hex text (`direction="hex_to_bin"`, automatically stripping whitespace, newlines, or `0x` prefixes).
 
 ---
 
@@ -417,10 +430,11 @@ How each editor passes the active project directory to `run_re_mcp.ps1`:
 ├── samples/                    # Default read-only input directory (.gitkeep)
 ├── output/                     # Default read-write output directory (.gitkeep)
 ├── plugin/
-│   └── re-sandbox/             # Distributable Antigravity plugin bundle
+│   └── re-sandbox/             # Distributable Antigravity plugin bundle (includes hooks.json & sync_workspace.ps1)
 └── .agents/
     ├── rules/
-    │   └── AGENTS.md           # Workspace agent rules for binary & DSP analysis
+    │   └── AGENTS.md           # Workspace agent rules for binary, hex & DSP analysis
     └── skills/
+        ├── install-re-sandbox/ # Agent skill for autonomous installation & setup
         └── reverse-engineering/# Workflow skill for re-sandbox-tools MCP server
 ```

@@ -10,8 +10,8 @@ description: >-
 
 Use the `re-sandbox-tools` MCP server whenever analyzing compiled binaries, DSP firmware, or packed archives.
 
-## 1. Multi-Project Path Handling
-- Pass the full path of any file in the current workspace (e.g. `C:/CODE/MyProject/samples/target.exe`) directly to the MCP tools.
+## 1. Per-Project Path Handling
+- Pass the relative path inside the active project (e.g. `samples/target.exe`) or full path inside the active workspace directly to the MCP tools.
 - All extracted files, decompilations, DSP assembly listings, and cached Ghidra projects are automatically written to `<project>/output/`.
 
 ## 2. Recommended Analysis Sequence

@@ -128,8 +128,8 @@ Write the following JSON to the MCP configuration file:
 When asked to inspect, triage, disassemble, or decompile binaries, installers, firmware, or DSP ROMs:
 
 ### A. Path Resolution & Output Routing
-- Pass the full host path (e.g. `C:/CODE/<project>/samples/<file>`) or relative workspace path (`samples/<file>`) directly to the `re-sandbox-tools` MCP tools.
-- `_translate_host_path()` automatically maps host paths into `/workspace/host_code/...` or `/workspace/samples/...`, and `_get_output_dir()` routes all decompilations, extracted archives, and Ghidra project caches into `<project>/output/`.
+- Pass the relative path inside the active project (e.g. `samples/<file>`, `drivers/<file>`) or the full path inside the active project directly to the `re-sandbox-tools` MCP tools.
+- `_translate_host_path()` automatically maps active project paths (`RE_PROJECT_ROOT`) into `/workspace/project/...` or `/workspace/samples/...`, and `_get_output_dir()` routes all decompilations, extracted archives, and Ghidra project caches into `/workspace/output/` (`<ActiveProject>/output/`).
 - **Never** commit target binaries, proprietary samples, or generated outputs into git. Keep inputs in `samples/` and outputs in `output/`.
 
 ### B. Initial Triage (Always Run First)
