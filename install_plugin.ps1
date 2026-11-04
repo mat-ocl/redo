@@ -236,6 +236,14 @@ $VsCodeMcpPath = Join-Path $VsCodeDir "mcp.json"
 } | ConvertTo-Json -Depth 6 | Set-Content -Path $VsCodeMcpPath -Encoding UTF8
 Write-Host "[+] Wrote VS Code workspace config: $VsCodeMcpPath" -ForegroundColor Green
 
+# 6. Restart/remove any running redo container for this project so updated re_mcp_server.py takes effect immediately
+$ProjectLeaf = (Split-Path -Leaf $ResolvedTarget).ToLowerInvariant() -replace '[^a-z0-9_.-]', '-'
+$ProjectLeaf = $ProjectLeaf.Trim('-', '.', '_')
+if ($ProjectLeaf) {
+    $ContainerName = "redo-$ProjectLeaf"
+    & docker rm -f $ContainerName *> $null
+}
+
 Write-Host ""
 Write-Host "[+] redo is now installed locally inside project: $ResolvedTarget" -ForegroundColor Cyan
 Write-Host "    - Input binaries : $ResolvedTarget/samples/"

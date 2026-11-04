@@ -86,7 +86,7 @@ public class DecompileTarget extends GhidraScript {
         if (cleanHex.startsWith("0x") || cleanHex.startsWith("0X")) {
             cleanHex = cleanHex.substring(2);
         }
-        if (cleanHex.matches("^[0-9a-fA-F]{4,16}$")) {
+        if (cleanHex.matches("^[0-9a-fA-F]{1,16}$")) {
             try {
                 Address addr = currentProgram.getAddressFactory().getDefaultAddressSpace().getAddress(cleanHex);
                 if (addr != null) {
@@ -1889,23 +1889,92 @@ def r2_strings(
     return out or "No matching strings found."
 
 
+def _build_r2_arch_setup(
+    target: Path,
+    arch: str = "",
+    bits: int = 0,
+    big_endian: Optional[bool] = None,
+    base_addr: str = "",
+) -> tuple[list[str], str]:
+    """
+    Build Radare2 CLI flags (`-a <arch>`, `-b <bits>`, `-e cfg.bigendian=...`, `-m <base_addr>`)
+    and `-c` setup string (`e scr.color=0; ...`) for raw firmware blobs (e.g. 32-bit Big-Endian
+    PowerPC `.bin` files) or non-standard architectures.
+    Auto-detects `arch='ppc', bits=32, big_endian=True` on raw `.bin` files whose filename
+    contains `'ppc'` (such as `pcore_pos_text_ppc_be.bin`).
+    """
+    setup = "e scr.color=0; "
+    cli_flags: list[str] = []
+    arch_clean = arch.strip().lower()
+    name_lower = target.name.lower()
+    head = target.read_bytes()[:4]
+    is_raw_bin = (head[:2] != b"MZ" and head != b"\x7fELF")
+
+    if not arch_clean and is_raw_bin:
+        if "ppc" in name_lower or "powerpc" in name_lower:
+            arch_clean = "ppc"
+            if bits <= 0:
+                bits = 64 if "ppc64" in name_lower else 32
+        elif "m68k" in name_lower or "68000" in name_lower:
+            arch_clean = "m68k"
+            if bits <= 0:
+                bits = 32
+
+    if arch_clean:
+        if not re.match(r"^[a-z0-9_.-]+$", arch_clean):
+            raise ValueError(f"Invalid arch '{arch}'.")
+        cli_flags.extend(["-a", arch_clean])
+        setup += f"e asm.arch={arch_clean}; e anal.arch={arch_clean}; "
+    if bits > 0:
+        cli_flags.extend(["-b", str(int(bits))])
+        setup += f"e asm.bits={int(bits)}; "
+
+    if big_endian is None:
+        if "_be." in name_lower or "_be_" in name_lower or name_lower.endswith("_be"):
+            big_endian = True
+        elif "_le." in name_lower or "_le_" in name_lower or name_lower.endswith("_le"):
+            big_endian = False
+        elif arch_clean in ("ppc", "m68k", "sparc", "s390") and is_raw_bin:
+            big_endian = True
+
+    if big_endian is not None:
+        be_str = "true" if big_endian else "false"
+        cli_flags.extend(["-e", f"cfg.bigendian={be_str}"])
+        setup += f"e cfg.bigendian={be_str}; "
+
+    if base_addr.strip():
+        b_clean = base_addr.strip()
+        if not _SAFE_HEX_OR_INT_RE.match(b_clean):
+            raise ValueError(f"Invalid base_addr '{base_addr}'.")
+        cli_flags.extend(["-m", b_clean])
+        setup += f"e bin.baddr={b_clean}; "
+
+    return cli_flags, setup
+
+
 @mcp.tool()
 def r2_list_functions(
     binary_path: str,
     filter_pattern: str = "",
     analysis_level: str = "aa",
-    max_entries: int = 150
+    max_entries: int = 150,
+    arch: str = "",
+    bits: int = 0,
+    big_endian: Optional[bool] = None,
+    base_addr: str = "",
 ) -> str:
     """
     Analyze binary functions and list detected function names, addresses, and sizes using Radare2.
     `analysis_level` defaults to 'aa' (fast symbol/call analysis, ideal for large C++ binaries);
-    use 'aaa' for deeper full-program analysis on smaller or stripped binaries.
+    use 'aaa' for deeper full-program analysis on smaller, stripped, or raw firmware binaries
+    (e.g. `arch="ppc", bits=32, big_endian=True`).
     """
     target = _validate_path(binary_path)
-    anal_cmd = "aaa" if analysis_level == "aaa" else "aa"
+    cli_flags, r2_setup = _build_r2_arch_setup(target, arch=arch, bits=bits, big_endian=big_endian, base_addr=base_addr)
+    anal_cmd = "aaa" if (analysis_level == "aaa" or cli_flags) else "aa"
     cmd = [
-        "r2", "-e", "bin.relocs.apply=true", "-q",
-        "-c", f"e scr.color=0; {anal_cmd}; afl",
+        "r2", *cli_flags, "-e", "bin.relocs.apply=true", "-q",
+        "-c", f"{r2_setup}{anal_cmd}; afl",
         str(target)
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -1930,24 +1999,30 @@ def r2_list_functions(
 def r2_xrefs(
     binary_path: str,
     target_addr_or_name: str,
-    analysis_level: str = "aa"
+    analysis_level: str = "aa",
+    arch: str = "",
+    bits: int = 0,
+    big_endian: Optional[bool] = None,
+    base_addr: str = "",
 ) -> str:
     """
     Find cross-references TO (axt) and FROM (axf) a given function name, symbol, or hex address
-    using Radare2 (`analysis_level` can be 'aa' for fast xrefs or 'aaa' for deep xrefs).
+    using Radare2 (`analysis_level` can be 'aa' for fast xrefs or 'aaa' for deep xrefs; supports
+    `arch`, `bits`, `big_endian`, and `base_addr` for raw firmware binaries).
     """
     target = _validate_path(binary_path)
     if not _SAFE_R2_TARGET_RE.match(target_addr_or_name):
         raise ValueError(f"Invalid identifier or address '{target_addr_or_name}'.")
 
-    anal_cmd = "aaa" if analysis_level == "aaa" else "aa; aar"
+    cli_flags, r2_setup = _build_r2_arch_setup(target, arch=arch, bits=bits, big_endian=big_endian, base_addr=base_addr)
+    anal_cmd = "aaa" if (analysis_level == "aaa" or cli_flags) else "aa; aar"
     r2_cmds = (
-        f"e scr.color=0; {anal_cmd}; "
+        f"{r2_setup}{anal_cmd}; "
         f"?e === XREFS TO {target_addr_or_name} ===; axt @ {target_addr_or_name}; "
         f"?e === XREFS FROM {target_addr_or_name} ===; axf @ {target_addr_or_name}"
     )
     res = subprocess.run(
-        ["r2", "-e", "bin.relocs.apply=true", "-q", "-c", r2_cmds, str(target)],
+        ["r2", *cli_flags, "-e", "bin.relocs.apply=true", "-q", "-c", r2_cmds, str(target)],
         capture_output=True,
         text=True,
         timeout=120
@@ -1957,7 +2032,14 @@ def r2_xrefs(
 
 
 @mcp.tool()
-def r2_callgraph(binary_path: str, function_name_or_addr: str) -> str:
+def r2_callgraph(
+    binary_path: str,
+    function_name_or_addr: str,
+    arch: str = "",
+    bits: int = 0,
+    big_endian: Optional[bool] = None,
+    base_addr: str = "",
+) -> str:
     """
     Extract the caller/callee callgraph for a specific function using Radare2 (agcj / afcf).
     """
@@ -1965,9 +2047,10 @@ def r2_callgraph(binary_path: str, function_name_or_addr: str) -> str:
     if not _SAFE_R2_TARGET_RE.match(function_name_or_addr):
         raise ValueError(f"Invalid function identifier or address '{function_name_or_addr}'.")
 
-    r2_cmds = f"e scr.color=0; aa; af @ {function_name_or_addr}; agcj @ {function_name_or_addr}"
+    cli_flags, r2_setup = _build_r2_arch_setup(target, arch=arch, bits=bits, big_endian=big_endian, base_addr=base_addr)
+    r2_cmds = f"{r2_setup}aa; af @ {function_name_or_addr}; agcj @ {function_name_or_addr}"
     res = subprocess.run(
-        ["r2", "-e", "bin.relocs.apply=true", "-q", "-c", r2_cmds, str(target)],
+        ["r2", *cli_flags, "-e", "bin.relocs.apply=true", "-q", "-c", r2_cmds, str(target)],
         capture_output=True,
         text=True,
         timeout=90
@@ -1979,16 +2062,20 @@ def r2_callgraph(binary_path: str, function_name_or_addr: str) -> str:
 @mcp.tool()
 def r2_disassemble_function(
     binary_path: str,
-    function_name_or_addr: str,
+    function_name_or_addr: str = "0x0",
     full_analysis: bool = False,
     arch: str = "",
     bits: int = 0,
-    base_addr: str = ""
+    big_endian: Optional[bool] = None,
+    base_addr: str = "",
+    num_instructions: int = 0,
 ) -> str:
     """
-    Disassemble a specific function (`af @ <target>; pdf @ <target>`) into assembly using Radare2.
-    Uses fast targeted function analysis by default so large 10MB+ C++ binaries disassemble in <2s;
-    set `full_analysis=True` to run `aaa` first.
+    Disassemble a function (`af @ <target>; pdf @ <target>`) or a linear instruction window
+    (`pd <num_instructions> @ <target>`) into assembly using Radare2.
+    Supports raw firmware blobs such as 32-bit Big-Endian PowerPC (`arch="ppc", bits=32, big_endian=True`).
+    If `num_instructions > 0` (or if `pdf` cannot find a function boundary in a raw `.bin` file),
+    falls back automatically to linear disassembly (`pd`).
     """
     target = _validate_path(binary_path)
     if not _SAFE_R2_TARGET_RE.match(function_name_or_addr):
@@ -1997,21 +2084,29 @@ def r2_disassemble_function(
             "Only alphanumeric characters and '_.:+-' are allowed."
         )
 
-    anal_prefix = "aaa" if full_analysis else f"af @ {function_name_or_addr}"
-    r2_setup = "e scr.color=0; "
-    if arch:
-        r2_setup += f"e asm.arch={arch}; "
-    if bits:
-        r2_setup += f"e asm.bits={bits}; "
-    if base_addr:
-        r2_setup += f"e bin.baddr={base_addr}; "
-    r2_commands = f"{r2_setup}{anal_prefix}; pdf @ {function_name_or_addr}"
-    cmd = ["r2", "-e", "bin.relocs.apply=true", "-q", "-c", r2_commands, str(target)]
+    cli_flags, r2_setup = _build_r2_arch_setup(target, arch=arch, bits=bits, big_endian=big_endian, base_addr=base_addr)
+    if num_instructions > 0:
+        r2_commands = f"{r2_setup}pd {int(num_instructions)} @ {function_name_or_addr}"
+    else:
+        anal_prefix = "aaa" if full_analysis else f"af @ {function_name_or_addr}"
+        r2_commands = f"{r2_setup}{anal_prefix}; pdf @ {function_name_or_addr}"
 
+    cmd = ["r2", *cli_flags, "-e", "bin.relocs.apply=true", "-q", "-c", r2_commands, str(target)]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-    if result.returncode != 0 and not result.stdout:
-        return f"Error executing r2: {result.stderr}"
-    out = result.stdout.strip() or "No disassembly generated. Verify the function identifier."
+    out = (result.stdout or "").strip()
+
+    # Fallback to linear disassembly (pd 64) if pdf returned empty on a raw firmware binary
+    if not out and num_instructions == 0:
+        fallback_cmd = [
+            "r2", *cli_flags, "-e", "bin.relocs.apply=true", "-q",
+            "-c", f"{r2_setup}pd 64 @ {function_name_or_addr}",
+            str(target)
+        ]
+        fb_res = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=60)
+        out = (fb_res.stdout or "").strip()
+
+    if not out:
+        return f"Error or empty disassembly from r2: {result.stderr or 'Verify the address/arch.'}"
     return _spill_or_preview_text(out, target, f"{target.stem}_{function_name_or_addr}_r2.asm")
 
 
@@ -2019,21 +2114,27 @@ def r2_disassemble_function(
 def r2_decompile_function(
     binary_path: str,
     function_name_or_addr: str,
-    full_analysis: bool = False
+    full_analysis: bool = False,
+    arch: str = "",
+    bits: int = 0,
+    big_endian: Optional[bool] = None,
+    base_addr: str = "",
 ) -> str:
     """
     Generate C-like pseudocode for a function using Radare2's built-in decompiler (pdc).
-    Uses fast targeted function analysis (`af @ <target>`) by default; for higher-fidelity C
-    decompilation, use `ghidra_decompile_function`.
+    Supports `arch` (e.g. `'ppc'`), `bits` (`32`), `big_endian` (`True`), and `base_addr`
+    for raw firmware blobs; for higher-fidelity C decompilation, use `ghidra_decompile_function`
+    (which also supports `processor="PowerPC:BE:32:default"`).
     """
     target = _validate_path(binary_path)
     if not _SAFE_R2_TARGET_RE.match(function_name_or_addr):
         raise ValueError(f"Invalid function identifier or address '{function_name_or_addr}'.")
 
+    cli_flags, r2_setup = _build_r2_arch_setup(target, arch=arch, bits=bits, big_endian=big_endian, base_addr=base_addr)
     anal_prefix = "aaa" if full_analysis else f"af @ {function_name_or_addr}"
-    r2_commands = f"e scr.color=0; {anal_prefix}; pdc @ {function_name_or_addr}"
+    r2_commands = f"{r2_setup}{anal_prefix}; pdc @ {function_name_or_addr}"
     result = subprocess.run(
-        ["r2", "-e", "bin.relocs.apply=true", "-q", "-c", r2_commands, str(target)],
+        ["r2", *cli_flags, "-e", "bin.relocs.apply=true", "-q", "-c", r2_commands, str(target)],
         capture_output=True,
         text=True,
         timeout=90
@@ -2069,22 +2170,25 @@ def ghidra_decompile_function(
     binary_path: str,
     function_name_or_addr: str,
     fast_mode: bool = False,
+    processor: Optional[str] = None,
+    base_address: Optional[str] = None,
     timeout_seconds: int = 240
 ) -> str:
     """
     Decompile a single native function (by export/symbol name like 'main'/'DllMain' or
-    hex virtual address like '0x18013f460') into clean C pseudocode using Ghidra's DecompInterface.
-    Automatically caches the Ghidra project in <project>/output/ghidra_cache so subsequent calls
-    take ~3-5 seconds.
-    Set `fast_mode=True` on large (>5MB) C++ binaries to skip full-program auto-analysis and
-    immediately decompile the target function in ~8 seconds (also used automatically as a fallback
-    if full auto-analysis exceeds `timeout_seconds`).
+    hex virtual address like '0x18013f460' or '0x0') into clean C pseudocode using Ghidra's
+    DecompInterface. Automatically caches the Ghidra project in <project>/output/ghidra_cache.
+    For raw firmware binaries (e.g. 32-bit Big-Endian PowerPC `.bin`), pass
+    `processor="PowerPC:BE:32:default"` (also auto-inferred if filename contains `ppc_be`).
     """
     target = _validate_path(binary_path)
     if not _SAFE_R2_TARGET_RE.match(function_name_or_addr):
         raise ValueError(f"Invalid function identifier or address '{function_name_or_addr}'.")
 
-    proj_dir, proj_name, is_cached = _get_ghidra_cache_info(target)
+    if not processor and "ppc_be" in target.name.lower():
+        processor = "PowerPC:BE:32:default"
+
+    proj_dir, proj_name, is_cached = _get_ghidra_cache_info(target, processor=processor)
     script_dir = Path(tempfile.mkdtemp(prefix="ghidra_scripts_"))
     script_file = script_dir / "DecompileTarget.java"
     script_file.write_text(_GHIDRA_DECOMPILE_TARGET_JAVA, encoding="utf-8")
@@ -2095,6 +2199,10 @@ def ghidra_decompile_function(
             base.extend(["-process", target.name, "-noanalysis"])
         else:
             base.extend(["-import", str(target), "-overwrite"])
+            if processor:
+                base.extend(["-loader", "BinaryLoader", "-processor", processor])
+            if base_address:
+                base.extend(["-baseAddr", base_address])
             if no_analysis:
                 base.append("-noanalysis")
         base.extend(["-scriptPath", str(script_dir), "-postScript", "DecompileTarget.java", function_name_or_addr])
@@ -2128,14 +2236,19 @@ def ghidra_list_functions(
     binary_path: str,
     filter_pattern: str = "",
     max_entries: int = 200,
+    processor: Optional[str] = None,
+    base_address: Optional[str] = None,
     timeout_seconds: int = 240
 ) -> str:
     """
     List functions and their C prototypes in a binary using Ghidra Headless (reusing the cached
-    Ghidra project in <project>/output/ghidra_cache if available).
+    Ghidra project in <project>/output/ghidra_cache if available). Pass `processor="PowerPC:BE:32:default"`
+    for raw 32-bit Big-Endian PowerPC firmware binaries.
     """
     target = _validate_path(binary_path)
-    proj_dir, proj_name, is_cached = _get_ghidra_cache_info(target)
+    if not processor and "ppc_be" in target.name.lower():
+        processor = "PowerPC:BE:32:default"
+    proj_dir, proj_name, is_cached = _get_ghidra_cache_info(target, processor=processor)
     script_dir = Path(tempfile.mkdtemp(prefix="ghidra_list_"))
     script_file = script_dir / "ListFunctions.java"
     script_file.write_text(_GHIDRA_LIST_FUNCTIONS_JAVA, encoding="utf-8")
@@ -2145,6 +2258,10 @@ def ghidra_list_functions(
         cmd.extend(["-process", target.name, "-noanalysis"])
     else:
         cmd.extend(["-import", str(target), "-overwrite"])
+        if processor:
+            cmd.extend(["-loader", "BinaryLoader", "-processor", processor])
+        if base_address:
+            cmd.extend(["-baseAddr", base_address])
     cmd.extend(["-scriptPath", str(script_dir), "-postScript", "ListFunctions.java", filter_pattern, str(max_entries)])
 
     try:
@@ -2163,18 +2280,24 @@ def ghidra_list_functions(
 def ghidra_decompile_all(
     binary_path: str,
     output_filename: Optional[str] = None,
+    processor: Optional[str] = None,
+    base_address: Optional[str] = None,
     timeout_seconds: int = 360
 ) -> str:
     """
     Decompile ALL non-thunk functions in a binary into a single C source file under
     the project's output/<output_filename> using Ghidra Headless (reusing the cached project if available),
     so you can search/read it with `search_workspace_files` and `read_workspace_file`.
+    Pass `processor="PowerPC:BE:32:default"` for raw 32-bit Big-Endian PowerPC firmware binaries.
     """
     target = _validate_path(binary_path)
     out_name = _safe_filename(output_filename) if output_filename else f"{target.stem}_ghidra_decompiled.c"
     out_path = _get_output_dir(target) / out_name
 
-    proj_dir, proj_name, is_cached = _get_ghidra_cache_info(target)
+    if not processor and "ppc_be" in target.name.lower():
+        processor = "PowerPC:BE:32:default"
+
+    proj_dir, proj_name, is_cached = _get_ghidra_cache_info(target, processor=processor)
     script_dir = Path(tempfile.mkdtemp(prefix="ghidra_all_"))
     script_file = script_dir / "DecompileAll.java"
     script_file.write_text(_GHIDRA_DECOMPILE_ALL_JAVA, encoding="utf-8")
@@ -2184,6 +2307,10 @@ def ghidra_decompile_all(
         cmd.extend(["-process", target.name, "-noanalysis"])
     else:
         cmd.extend(["-import", str(target), "-overwrite"])
+        if processor:
+            cmd.extend(["-loader", "BinaryLoader", "-processor", processor])
+        if base_address:
+            cmd.extend(["-baseAddr", base_address])
     cmd.extend(["-scriptPath", str(script_dir), "-postScript", "DecompileAll.java", str(out_path)])
 
     try:
@@ -3213,6 +3340,10 @@ def generate_algorithm_skeleton(
     target_language: str = "python",
     table_vas: Optional[str] = None,
     output_filename: Optional[str] = None,
+    arch: str = "",
+    bits: int = 0,
+    big_endian: Optional[bool] = None,
+    base_addr: str = "",
 ) -> str:
     """
     Generate a runnable Python (`.py`) or C# (`.cs`) algorithm reimplementation skeleton from a
@@ -3231,12 +3362,13 @@ def generate_algorithm_skeleton(
     is_py = lang in ("python", "py")
 
     # 1. Extract CFG (agfj) and pseudocode (pdc) from Radare2
+    cli_flags, r2_setup = _build_r2_arch_setup(target, arch=arch, bits=bits, big_endian=big_endian, base_addr=base_addr)
     r2_cmd = (
-        f"e scr.color=0; aa; s {function_name_or_addr}; af; "
+        f"{r2_setup}aa; s {function_name_or_addr}; af; "
         f"echo ===CFG_JSON===; agfj; echo ===PDC===; pdc"
     )
     res = subprocess.run(
-        ["r2", "-q", "-c", r2_cmd, str(target)],
+        ["r2", *cli_flags, "-q", "-c", r2_cmd, str(target)],
         capture_output=True,
         text=True,
         timeout=90,
