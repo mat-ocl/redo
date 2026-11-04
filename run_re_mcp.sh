@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 1. Resolve repository root (directory containing this script)
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 1. Resolve directory containing this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="${RE_IMAGE_NAME:-ghcr.io/mat-ocl/redo:latest}"
-
-PLUGIN_STATE_DIR="${HOME}/.gemini/config/plugins/re-sandbox"
-ACTIVE_WORKSPACE_FILE="${PLUGIN_STATE_DIR}/active_workspace.txt"
 
 # 2. Ensure ghcr.io/mat-ocl/redo:latest exists locally; auto-pull from GHCR on stderr if missing
 if ! docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
@@ -14,23 +11,26 @@ if ! docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
     docker pull "${IMAGE_NAME}" >&2 || true
 fi
 
-# 3. Resolve active project directory:
-#    arg 1 -> RE_PROJECT_DIR -> PWD (when spawned per-project by Zed/Cursor/VS Code/Claude) -> active_workspace.txt -> REPO_ROOT
+# 3. Resolve project directory:
+#    Priority 1: Explicit arg 1 or RE_PROJECT_DIR
+#    Priority 2: Project-local installation path (<Project>/.agents/plugins/redo or <Project>/redo-plugin)
+#    Priority 3: PWD (if not $HOME or /)
 PROJECT_DIR="${1:-${RE_PROJECT_DIR:-}}"
 if [[ -z "${PROJECT_DIR}" ]]; then
-    if [[ "${PWD}" != "${HOME}" && "${PWD}" != "${REPO_ROOT}" && "${PWD}" != "/" ]]; then
+    if [[ "${SCRIPT_DIR}" == */.agents/plugins/redo ]]; then
+        PROJECT_DIR="${SCRIPT_DIR%/.agents/plugins/redo}"
+    elif [[ "${SCRIPT_DIR}" == */redo-plugin ]]; then
+        PROJECT_DIR="${SCRIPT_DIR%/redo-plugin}"
+    elif [[ "${SCRIPT_DIR}" == */.redo ]]; then
+        PROJECT_DIR="${SCRIPT_DIR%/.redo}"
+    elif [[ "${PWD}" != "${HOME}" && "${PWD}" != "/" ]]; then
         PROJECT_DIR="${PWD}"
-    elif [[ -f "${ACTIVE_WORKSPACE_FILE}" ]]; then
-        SAVED_WS="$(tr -d '\r\n' < "${ACTIVE_WORKSPACE_FILE}")"
-        if [[ -n "${SAVED_WS}" && -d "${SAVED_WS}" ]]; then
-            PROJECT_DIR="${SAVED_WS}"
-        fi
+    else
+        PROJECT_DIR="${SCRIPT_DIR}"
     fi
 fi
-if [[ -z "${PROJECT_DIR}" ]]; then
-    PROJECT_DIR="${REPO_ROOT}"
-fi
 
+PROJECT_DIR="$(cd "${PROJECT_DIR}" && pwd)"
 SAMPLES_DIR="${PROJECT_DIR}/samples"
 OUTPUT_DIR="${PROJECT_DIR}/output"
 mkdir -p "${SAMPLES_DIR}" "${OUTPUT_DIR}"
@@ -53,8 +53,8 @@ DOCKER_ARGS=(
     -v "${PROJECT_DIR}:/workspace/project:rw"
 )
 
-if [[ -f "${REPO_ROOT}/re_mcp_server.py" ]]; then
-    DOCKER_ARGS+=(-v "${REPO_ROOT}/re_mcp_server.py:/opt/re-mcp/re_mcp_server.py:ro")
+if [[ -f "${SCRIPT_DIR}/re_mcp_server.py" ]]; then
+    DOCKER_ARGS+=(-v "${SCRIPT_DIR}/re_mcp_server.py:/opt/re-mcp/re_mcp_server.py:ro")
 fi
 
 exec docker "${DOCKER_ARGS[@]}" "${IMAGE_NAME}" re-mcp-server

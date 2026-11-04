@@ -1,15 +1,11 @@
 param(
+    [Parameter(Position = 0)]
+    [string]$TargetWorkspace = "",
     [switch]$Uninstall = $false,
     [switch]$RemoveImage = $false,
     [switch]$BuildImage = $false,
     [switch]$PullImage = $false,
-    [switch]$SkipImage = $false,
-    [switch]$SkipZed = $false,
-    [switch]$SelfContained = $false,
-    [string]$TargetWorkspace = "",
-    [ValidateSet("pwsh", "docker")]
-    [string]$ZedMode = "pwsh",
-    [string]$PluginDest = ""
+    [switch]$SkipImage = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,10 +15,25 @@ if (-not $RepoRoot) {
     $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 }
 
+# Resolve target project directory (defaults to current working directory if different from $RepoRoot)
+if (-not $TargetWorkspace) {
+    $cwd = (Get-Location).Path
+    if ($cwd -ne $RepoRoot) {
+        $TargetWorkspace = $cwd
+    } else {
+        throw "Please specify the target project folder to install redo into:`n  .\install_plugin.ps1 -TargetWorkspace '<ProjectPath>'"
+    }
+}
+
+if (-not (Test-Path $TargetWorkspace)) {
+    New-Item -ItemType Directory -Path $TargetWorkspace -Force | Out-Null
+}
+$ResolvedTarget = ((Resolve-Path $TargetWorkspace).Path -replace "\\", "/").TrimEnd("/")
+
 if ($Uninstall) {
     $UninstallScript = Join-Path $RepoRoot "uninstall_plugin.ps1"
     if (Test-Path $UninstallScript) {
-        & $UninstallScript -RemoveImage:$RemoveImage -SkipZed:$SkipZed -TargetWorkspace $TargetWorkspace -PluginDest $PluginDest
+        & $UninstallScript -TargetWorkspace $ResolvedTarget -RemoveImage:$RemoveImage
         exit $LASTEXITCODE
     } else {
         throw "uninstall_plugin.ps1 not found at $UninstallScript"
@@ -31,7 +42,7 @@ if ($Uninstall) {
 
 $ImageName = "ghcr.io/mat-ocl/redo:latest"
 
-# 1. Ensure Docker image 'ghcr.io/mat-ocl/redo:latest' is available (prefers fast GHCR pull unless -BuildImage is passed)
+# 1. Ensure Docker image 'ghcr.io/mat-ocl/redo:latest' is available locally
 if (-not $SkipImage) {
     if ($BuildImage) {
         Write-Host "[*] Building Docker image '$ImageName' from $RepoRoot..." -ForegroundColor Cyan
@@ -71,94 +82,157 @@ if (-not $SkipImage) {
     }
 }
 
-# 2. Install/Update Antigravity Plugin (~/.gemini/config/plugins/re-sandbox)
-if (-not $PluginDest) {
-    $PluginDest = Join-Path $HOME ".gemini\config\plugins\re-sandbox"
+# 2. Create project samples/ and output/ directories
+New-Item -ItemType Directory -Path (Join-Path $ResolvedTarget "samples") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $ResolvedTarget "output") -Force | Out-Null
+
+# 3. Install self-contained redo plugin into <Project>/.agents/plugins/redo/
+$ProjectPluginDir = Join-Path $ResolvedTarget ".agents\plugins\redo"
+New-Item -ItemType Directory -Path $ProjectPluginDir -Force | Out-Null
+
+$PluginSource = Join-Path $RepoRoot "plugin\redo"
+if (Test-Path $PluginSource) {
+    Copy-Item -Path (Join-Path $PluginSource "*") -Destination $ProjectPluginDir -Recurse -Force
 }
 
-# Detect if running from a temporary/scratch clone (e.g. Antigravity brain\...\scratch or Temp)
-$IsTempClone = ($RepoRoot -match '(?i)(\\scratch\\|\\temp\\|/tmp/)') -or $SelfContained
-
-$PluginSource = Join-Path $RepoRoot "plugin\re-sandbox"
-if (Test-Path $PluginSource) {
-    Write-Host "[*] Installing Antigravity plugin to: $PluginDest" -ForegroundColor Cyan
-    New-Item -ItemType Directory -Path $PluginDest -Force | Out-Null
-    Copy-Item -Path (Join-Path $PluginSource "*") -Destination $PluginDest -Recurse -Force
-
-    # Always copy run_re_mcp.ps1, re_mcp_server.py, and uninstall_plugin.ps1 into the plugin directory so it can run or uninstall self-contained
-    Copy-Item -Path (Join-Path $RepoRoot "run_re_mcp.ps1") -Destination (Join-Path $PluginDest "run_re_mcp.ps1") -Force
-    Copy-Item -Path (Join-Path $RepoRoot "re_mcp_server.py") -Destination (Join-Path $PluginDest "re_mcp_server.py") -Force
-    if (Test-Path (Join-Path $RepoRoot "uninstall_plugin.ps1")) {
-        Copy-Item -Path (Join-Path $RepoRoot "uninstall_plugin.ps1") -Destination (Join-Path $PluginDest "uninstall_plugin.ps1") -Force
+foreach ($file in @("run_re_mcp.ps1", "run_re_mcp.sh", "re_mcp_server.py", "uninstall_plugin.ps1")) {
+    $src = Join-Path $RepoRoot $file
+    if (Test-Path $src) {
+        Copy-Item -Path $src -Destination (Join-Path $ProjectPluginDir $file) -Force
     }
+}
 
-    if ($IsTempClone) {
-        $LauncherPath = (Join-Path $PluginDest "run_re_mcp.ps1") -replace "\\", "/"
-        Write-Host "[*] Temporary/scratch clone detected: using self-contained launcher at $LauncherPath" -ForegroundColor Cyan
-    } else {
-        $LauncherPath = (Join-Path $RepoRoot "run_re_mcp.ps1") -replace "\\", "/"
-    }
+$LauncherPath = ((Join-Path $ProjectPluginDir "run_re_mcp.ps1") -replace "\\", "/")
+$CommonArgs = @(
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    $LauncherPath,
+    "-ProjectDir",
+    $ResolvedTarget
+)
 
-    # Dynamically write mcp_config.json with the resolved path to run_re_mcp.ps1
-    $McpConfigObj = @{
-        mcpServers = @{
-            "re-sandbox-tools" = @{
-                command = "pwsh"
-                args = @(
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    $LauncherPath
-                )
-            }
+# Write <Project>/.agents/plugins/redo/mcp_config.json (Google Antigravity workspace plugin MCP)
+$AntigravityMcpPath = Join-Path $ProjectPluginDir "mcp_config.json"
+@{
+    mcpServers = @{
+        redo = @{
+            command = "pwsh"
+            args    = $CommonArgs
         }
     }
-    $McpConfigPath = Join-Path $PluginDest "mcp_config.json"
-    $McpConfigObj | ConvertTo-Json -Depth 6 | Set-Content -Path $McpConfigPath -Encoding UTF8
-    Write-Host "[+] Installed Antigravity plugin and updated $McpConfigPath" -ForegroundColor Green
+} | ConvertTo-Json -Depth 6 | Set-Content -Path $AntigravityMcpPath -Encoding UTF8
+Write-Host "[+] Installed self-contained workspace plugin: $ProjectPluginDir" -ForegroundColor Green
+
+# 4. Copy workspace .agents/rules and .agents/skills into <Project>/.agents/
+$SourceAgents = Join-Path $RepoRoot ".agents"
+$DestAgents = Join-Path $ResolvedTarget ".agents"
+if (Test-Path $SourceAgents) {
+    foreach ($sub in @("rules", "skills")) {
+        $srcSub = Join-Path $SourceAgents $sub
+        if (Test-Path $srcSub) {
+            $dstSub = Join-Path $DestAgents $sub
+            New-Item -ItemType Directory -Path $dstSub -Force | Out-Null
+            Copy-Item -Path (Join-Path $srcSub "*") -Destination $dstSub -Recurse -Force
+        }
+    }
+    Write-Host "[+] Installed workspace rules & skills: $DestAgents" -ForegroundColor Green
 }
 
-# 3. Optionally install .agents rules & skills into a target project workspace
-if ($TargetWorkspace -and (Test-Path $TargetWorkspace)) {
-    $SourceAgents = Join-Path $RepoRoot ".agents"
-    $DestAgents = Join-Path $TargetWorkspace ".agents"
-    if (Test-Path $SourceAgents) {
-        New-Item -ItemType Directory -Path $DestAgents -Force | Out-Null
-        Copy-Item -Path (Join-Path $SourceAgents "*") -Destination $DestAgents -Recurse -Force
-        Write-Host "[+] Copied .agents rules and skills into workspace: $DestAgents" -ForegroundColor Green
+# 5. Write workspace-scoped editor MCP configs & tool permissions inside <Project>
+
+# Extract all @mcp.tool() names from re_mcp_server.py so Zed auto-allows all 50 redo tools
+$ZedToolPermissions = [ordered]@{}
+$ServerPyFile = Join-Path $ProjectPluginDir "re_mcp_server.py"
+if (Test-Path $ServerPyFile) {
+    $PyContent = Get-Content -Path $ServerPyFile -Raw -Encoding UTF8
+    $ToolMatches = [regex]::Matches($PyContent, '(?m)^@mcp\.tool\(\)\s*\r?\ndef\s+([a-zA-Z0-9_]+)\s*\(')
+    foreach ($m in $ToolMatches) {
+        $toolName = $m.Groups[1].Value
+        $ZedToolPermissions["mcp:redo:$toolName"] = @{ default = "allow" }
     }
 }
 
-# 4. Install/Update Zed Editor Configuration (unless -SkipZed is passed)
-$ZedInstaller = Join-Path $RepoRoot "install_zed.ps1"
-if (-not $SkipZed -and (Test-Path $ZedInstaller)) {
-    Write-Host "[*] Configuring Zed Editor MCP integration..." -ForegroundColor Cyan
-    if ($IsTempClone) {
-        & $ZedInstaller -Mode "docker"
-    } else {
-        & $ZedInstaller -Mode $ZedMode
+# 5a. Zed Editor: <Project>/.zed/settings.json (includes context_servers.redo + agent.tool_permissions)
+$ZedDir = Join-Path $ResolvedTarget ".zed"
+New-Item -ItemType Directory -Path $ZedDir -Force | Out-Null
+$ZedSettingsPath = Join-Path $ZedDir "settings.json"
+@{
+    context_servers = @{
+        redo = @{
+            source  = "custom"
+            command = "pwsh"
+            args    = $CommonArgs
+            env     = @{}
+        }
     }
-}
+    agent = @{
+        tool_permissions = @{
+            tools = $ZedToolPermissions
+        }
+    }
+} | ConvertTo-Json -Depth 6 | Set-Content -Path $ZedSettingsPath -Encoding UTF8
+Write-Host "[+] Wrote Zed workspace config & tool permissions ($($ZedToolPermissions.Count) tools allowed): $ZedSettingsPath" -ForegroundColor Green
+
+# 5b. Cursor: <Project>/.cursor/mcp.json
+$CursorDir = Join-Path $ResolvedTarget ".cursor"
+New-Item -ItemType Directory -Path $CursorDir -Force | Out-Null
+$CursorMcpPath = Join-Path $CursorDir "mcp.json"
+@{
+    mcpServers = @{
+        redo = @{
+            command = "pwsh"
+            args    = $CommonArgs
+        }
+    }
+} | ConvertTo-Json -Depth 6 | Set-Content -Path $CursorMcpPath -Encoding UTF8
+Write-Host "[+] Wrote Cursor workspace config: $CursorMcpPath" -ForegroundColor Green
+
+# 5c. Claude Code: <Project>/.mcp.json + <Project>/.claude/settings.local.json (tool permissions)
+$ClaudeMcpPath = Join-Path $ResolvedTarget ".mcp.json"
+@{
+    mcpServers = @{
+        redo = @{
+            command = "pwsh"
+            args    = $CommonArgs
+        }
+    }
+} | ConvertTo-Json -Depth 6 | Set-Content -Path $ClaudeMcpPath -Encoding UTF8
+
+$ClaudeDir = Join-Path $ResolvedTarget ".claude"
+New-Item -ItemType Directory -Path $ClaudeDir -Force | Out-Null
+$ClaudeSettingsPath = Join-Path $ClaudeDir "settings.local.json"
+@{
+    permissions = @{
+        allow = @(
+            "mcp__redo",
+            "mcp__redo__*"
+        )
+    }
+    enableAllProjectMcpServers = $true
+    enabledMcpjsonServers      = @("redo")
+} | ConvertTo-Json -Depth 6 | Set-Content -Path $ClaudeSettingsPath -Encoding UTF8
+Write-Host "[+] Wrote Claude Code workspace config & tool permissions: $ClaudeMcpPath, $ClaudeSettingsPath" -ForegroundColor Green
+
+# 5d. VS Code (Copilot MCP): <Project>/.vscode/mcp.json
+$VsCodeDir = Join-Path $ResolvedTarget ".vscode"
+New-Item -ItemType Directory -Path $VsCodeDir -Force | Out-Null
+$VsCodeMcpPath = Join-Path $VsCodeDir "mcp.json"
+@{
+    servers = @{
+        redo = @{
+            type    = "stdio"
+            command = "pwsh"
+            args    = $CommonArgs
+        }
+    }
+} | ConvertTo-Json -Depth 6 | Set-Content -Path $VsCodeMcpPath -Encoding UTF8
+Write-Host "[+] Wrote VS Code workspace config: $VsCodeMcpPath" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "=== Generic MCP Client Configuration Snippet ===" -ForegroundColor Yellow
-Write-Host "Add this to your claude_desktop_config.json, .cursor/mcp.json, or mcp_config.json:"
-Write-Host @"
-{
-  "mcpServers": {
-    "re-sandbox-tools": {
-      "command": "pwsh",
-      "args": [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "$LauncherPath"
-      ]
-    }
-  }
-}
-"@
+Write-Host "[+] redo is now installed locally inside project: $ResolvedTarget" -ForegroundColor Cyan
+Write-Host "    - Input binaries : $ResolvedTarget/samples/"
+Write-Host "    - Output files   : $ResolvedTarget/output/"
+Write-Host "    - Uninstall      : pwsh -File `"$ProjectPluginDir\uninstall_plugin.ps1`" -TargetWorkspace `"$ResolvedTarget`""

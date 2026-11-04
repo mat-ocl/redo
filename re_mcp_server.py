@@ -40,7 +40,7 @@ if os.path.isdir(_dsp_bin) and _dsp_bin not in os.environ.get("PATH", ""):
     os.environ["PATH"] = f"{_dsp_bin}:{os.environ.get('PATH', '')}"
 
 # Initialize the MCP server
-mcp = MCPServer("RE-Sandbox-Tools")
+mcp = MCPServer("redo")
 
 WORKSPACE_DIR = Path("/workspace").resolve()
 SAMPLES_DIR = (WORKSPACE_DIR / "samples").resolve()
@@ -380,6 +380,54 @@ def _safe_filename(name: str) -> str:
     return clean
 
 
+def _spill_or_preview_text(
+    text: str,
+    target: Optional[Path],
+    default_filename: str,
+    max_inline_chars: int = 3500,
+    max_inline_lines: int = 65,
+    force_save: bool = False,
+) -> str:
+    """
+    Protect the LLM context window by automatically spilling outputs larger than
+    `max_inline_chars` or `max_inline_lines` (or when `force_save=True`) to
+    `<project>/output/<default_filename>` and returning only a compact preview + file path.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return text
+
+    lines = stripped.splitlines()
+    total_lines = len(lines)
+    total_chars = len(stripped)
+
+    if not force_save and total_chars <= max_inline_chars and total_lines <= max_inline_lines:
+        return stripped
+
+    out_root = _get_output_dir(target) if target is not None else OUTPUT_DIR
+    out_root.mkdir(parents=True, exist_ok=True)
+    cleaned_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", default_filename)
+    out_file = out_root / _safe_filename(cleaned_name)
+    out_file.write_text(stripped + "\n", encoding="utf-8")
+
+    preview_lines = lines[:max_inline_lines]
+    preview = "\n".join(preview_lines)
+    if len(preview) > max_inline_chars:
+        preview = preview[:max_inline_chars]
+
+    omitted_lines = max(0, total_lines - len(preview.splitlines()))
+    omitted_chars = max(0, total_chars - len(preview))
+    if omitted_lines == 0 and omitted_chars == 0:
+        return f"[Saved to: {out_file} ({total_chars} chars, {total_lines} lines)]\n\n{preview}"
+
+    return (
+        f"[Full output ({total_chars} chars, {total_lines} lines) auto-saved to: {out_file}]\n"
+        f"[Use read_workspace_file('{out_file}', start_line=1, max_lines=150) or search_workspace_files to inspect further.]\n\n"
+        f"{preview}\n"
+        f"... [omitted {omitted_lines} lines / {omitted_chars} chars — full output in {out_file}]"
+    )
+
+
 def _get_staging_dir(project_dir: Optional[str] = None) -> Path:
     """
     Return a writable staging directory for the target project (or default workspace).
@@ -412,20 +460,29 @@ def _require_tool(binary_name: str) -> str:
 # =====================================================================
 
 @mcp.tool()
-def list_workspace_files(subdir: str = "") -> str:
+def list_workspace_files(subdir: str = "", project_dir: Optional[str] = None) -> str:
     """
     List files available in the active project or /workspace.
     `subdir` can be a relative subdirectory (e.g. 'samples', 'output', 'drivers') OR a path
-    inside the active project.
+    inside the active project. Optionally pass `project_dir` to target a specific project root.
     """
-    base = _translate_host_path(subdir)
+    target_arg = subdir
+    if project_dir:
+        target_arg = f"{project_dir.rstrip('/\\')}/{subdir.lstrip('/\\')}" if subdir else project_dir
+    base = _translate_host_path(target_arg)
     if not _is_within(base, WORKSPACE_DIR):
         raise ValueError("Directory must remain within /workspace.")
     if not base.exists():
         return f"Directory does not exist: {base}"
 
+    skip_dirs = {
+        ".git", ".agents", ".zed", ".cursor", ".vscode",
+        "redo-plugin", "node_modules", ".venv", "__pycache__", "ghidra_cache"
+    }
     entries = []
     for p in sorted(base.rglob("*")):
+        if any(part in skip_dirs for part in p.relative_to(base).parts):
+            continue
         if len(entries) >= 500:
             entries.append("... [truncated at 500 entries]")
             break
@@ -458,13 +515,17 @@ def search_workspace_files(
     regex_pattern: str,
     subdir: str = "output",
     file_glob: str = "*",
-    max_matches: int = 100
+    max_matches: int = 100,
+    project_dir: Optional[str] = None
 ) -> str:
     """
     Search across decompiled or extracted text files in `subdir` (defaults to 'output' in the
-    active project) using a regex.
+    active project) using a regex. Optionally pass `project_dir` to target a specific project root.
     """
-    base = _translate_host_path(subdir) if subdir else WORKSPACE_DIR
+    target_arg = subdir
+    if project_dir:
+        target_arg = f"{project_dir.rstrip('/\\')}/{subdir.lstrip('/\\')}" if subdir else project_dir
+    base = _translate_host_path(target_arg) if target_arg else WORKSPACE_DIR
     if not _is_within(base, WORKSPACE_DIR):
         raise ValueError("Subdirectory must remain within /workspace.")
     if not base.exists():
@@ -548,22 +609,116 @@ def _find_hex_pattern_offsets(data: bytes, hex_pattern: str, max_hits: int = 100
     return hits
 
 
+def _parse_int_or_hex(val: str) -> int:
+    """Parse an integer or hexadecimal string (e.g. '0x870b50', '870b50h', '870b50')."""
+    s = val.strip()
+    if s.lower().endswith("h") and not s.lower().startswith("0x"):
+        s = "0x" + s[:-1]
+    if s.lower().startswith("0x"):
+        return int(s, 16)
+    if re.search(r"[a-fA-F]", s):
+        return int(s, 16)
+    return int(s, 0)
+
+
+def _resolve_va_or_rva_to_offset(data: bytes, va_or_rva_str: str) -> tuple[int, str]:
+    """
+    Resolve a Virtual Address (VA) or Relative Virtual Address (RVA) in a PE or ELF binary
+    to its raw file byte offset. Returns (raw_file_offset, human_readable_summary).
+    """
+    addr = _parse_int_or_hex(va_or_rva_str)
+    if data[:2] == b"MZ":
+        import pefile
+
+        pe = pefile.PE(data=data, fast_load=True)
+        img_base = pe.OPTIONAL_HEADER.ImageBase
+        if addr >= img_base:
+            rva = addr - img_base
+            va = addr
+        else:
+            rva = addr
+            va = img_base + addr
+
+        for sec in pe.sections:
+            sec_name = sec.Name.rstrip(b"\x00").decode("ascii", errors="replace")
+            v_start = sec.VirtualAddress
+            v_span = max(sec.Misc_VirtualSize, sec.SizeOfRawData)
+            if v_start <= rva < v_start + v_span:
+                delta = rva - v_start
+                raw_off = sec.PointerToRawData + delta
+                summary = (
+                    f"VA 0x{va:X} (RVA 0x{rva:X}) -> Section '{sec_name}' "
+                    f"(SecVA 0x{img_base + v_start:X}, SecRVA 0x{v_start:X}, RawPtr 0x{sec.PointerToRawData:X} + 0x{delta:X}) "
+                    f"-> File Offset 0x{raw_off:X} ({raw_off})"
+                )
+                return raw_off, summary
+
+        # Fallback to pefile's get_offset_from_rva
+        raw_off = pe.get_offset_from_rva(rva)
+        return (
+            raw_off,
+            f"VA 0x{va:X} (RVA 0x{rva:X}) -> File Offset 0x{raw_off:X} ({raw_off})",
+        )
+
+    elif data[:4] == b"\x7fELF":
+        import io
+        from elftools.elf.elffile import ELFFile
+
+        with io.BytesIO(data) as bio:
+            elf = ELFFile(bio)
+            for sec in elf.iter_sections():
+                sh_addr = sec["sh_addr"]
+                sh_size = sec["sh_size"]
+                sh_off = sec["sh_offset"]
+                if sh_addr > 0 and sec["sh_type"] != "SHT_NOBITS" and sh_addr <= addr < sh_addr + sh_size:
+                    delta = addr - sh_addr
+                    raw_off = sh_off + delta
+                    return (
+                        raw_off,
+                        f"VA 0x{addr:X} -> ELF Section '{sec.name}' "
+                        f"(VAddr 0x{sh_addr:X}, FileOff 0x{sh_off:X} + 0x{delta:X}) "
+                        f"-> File Offset 0x{raw_off:X} ({raw_off})",
+                    )
+            for seg in elf.iter_segments():
+                if seg["p_type"] == "PT_LOAD":
+                    p_vaddr = seg["p_vaddr"]
+                    p_filesz = seg["p_filesz"]
+                    p_offset = seg["p_offset"]
+                    if p_vaddr <= addr < p_vaddr + p_filesz:
+                        delta = addr - p_vaddr
+                        raw_off = p_offset + delta
+                        return (
+                            raw_off,
+                            f"VA 0x{addr:X} -> ELF PT_LOAD (VAddr 0x{p_vaddr:X}, FileOff 0x{p_offset:X} + 0x{delta:X}) "
+                            f"-> File Offset 0x{raw_off:X} ({raw_off})",
+                        )
+        raise ValueError(f"Virtual address 0x{addr:X} did not match any mapped ELF section or PT_LOAD segment.")
+
+    raise ValueError(
+        f"Cannot resolve virtual_address '{va_or_rva_str}': file is neither a PE ('MZ') nor an ELF binary. "
+        "Use byte_offset for raw binary files."
+    )
+
+
 @mcp.tool()
 def binary_hex_dump(
     file_path: str,
     byte_offset: int = 0,
-    byte_length: int = 512,
+    byte_length: int = 256,
     format_style: str = "canonical",
     bytes_per_line: int = 16,
     search_hex_pattern: Optional[str] = None,
+    virtual_address: Optional[str] = None,
     save_output: bool = False,
     output_filename: Optional[str] = None,
 ) -> str:
     """
     Read and format binary file bytes into LLM-friendly hexadecimal text representations,
-    with optional wildcard hex pattern search (e.g. `search_hex_pattern="F0 43 ?? 00"`).
-    Ideal for inspecting unknown binary structures, synthesizer SysEx (.syx) dumps, ROM tables,
-    DSP56300 24-bit coefficient/lookup tables, or file headers without UTF-8 corruption.
+    with optional wildcard hex pattern search (e.g. `search_hex_pattern="F0 43 ?? 00"`) or direct
+    PE/ELF Virtual Address / RVA resolution (e.g. `virtual_address="0x870b50"`).
+    Ideal for inspecting unknown binary structures, PE/ELF `.rdata`/`.data` lookup tables,
+    synthesizer SysEx (.syx) dumps, ROM tables, DSP56300 24-bit coefficient/lookup tables,
+    or file headers without UTF-8 corruption.
 
     Supported `format_style` values:
     - "canonical" (default): Offset + grouped hex bytes + printable ASCII sidebar (`hexdump -C` style).
@@ -579,6 +734,13 @@ def binary_hex_dump(
 
     file_size = target.stat().st_size
     search_summary = ""
+    va_summary = ""
+
+    if virtual_address:
+        full_bytes = target.read_bytes()
+        resolved_off, va_desc = _resolve_va_or_rva_to_offset(full_bytes, virtual_address)
+        byte_offset = resolved_off
+        va_summary = f"VA Resolution: {va_desc}\n"
 
     if search_hex_pattern:
         full_bytes = target.read_bytes()
@@ -594,7 +756,7 @@ def binary_hex_dump(
         search_summary = (
             f"Hex Pattern Search '{search_hex_pattern}': {len(hits)} match(es) at offset(s): {hit_str}\n"
         )
-        if byte_offset == 0:
+        if byte_offset == 0 and not virtual_address:
             byte_offset = hits[0]
 
     if byte_offset < 0 or byte_offset >= max(1, file_size):
@@ -673,22 +835,42 @@ def binary_hex_dump(
 
     body = "\n".join(lines)
     saved_note = ""
-    if save_output:
+    auto_spill = save_output or len(chunk) > 256 or len(body) > 2000 or bool(output_filename)
+    if auto_spill:
         out_root = _get_output_dir(target)
         out_name = _safe_filename(
             output_filename or f"{target.stem}_0x{byte_offset:X}_{len(chunk)}B_{fmt}.txt"
         )
         out_file = out_root / out_name
         out_file.write_text(body, encoding="utf-8")
-        saved_note = f"Saved output to: {out_file}\n"
+        if len(chunk) > 256:
+            bin_slice_file = out_root / _safe_filename(f"{target.stem}_0x{byte_offset:X}_{len(chunk)}B.bin")
+            bin_slice_file.write_bytes(chunk)
+            saved_note = (
+                f"Auto-saved full hex dump ({len(chunk)} B) to: {out_file}\n"
+                f"Auto-saved raw binary slice ({len(chunk)} B) to: {bin_slice_file}\n"
+            )
+        else:
+            saved_note = f"Saved output to: {out_file}\n"
 
     header = (
         f"=== Binary Hex Dump: {target.name} (file size: {file_size} B, "
         f"showing offset 0x{byte_offset:X}..0x{byte_offset + len(chunk):X} [{len(chunk)} B], "
         f"style={fmt}) ===\n"
     )
-    preview = body if len(body) <= 24000 else body[:24000] + "\n... [truncated inline preview]"
-    return header + search_summary + saved_note + preview
+    if len(lines) > 20:
+        preview = (
+            "\n".join(lines[:20])
+            + f"\n... [omitted {len(lines) - 20} lines ({len(chunk)} B total) to save LLM context — full dump in {out_file}]"
+        )
+    elif len(body) > 2000:
+        preview = (
+            body[:2000]
+            + f"\n... [omitted {len(body) - 2000} chars ({len(chunk)} B total) to save LLM context — full dump in {out_file}]"
+        )
+    else:
+        preview = body
+    return header + va_summary + search_summary + saved_note + preview
 
 
 @mcp.tool()
@@ -699,13 +881,14 @@ def binary_hex_convert(
     hex_format: str = "raw",
     byte_offset: int = 0,
     byte_length: int = 0,
+    virtual_address: Optional[str] = None,
 ) -> str:
     """
     Bidirectional Binary <-> Hexadecimal Text file converter powered by `binhexconv` (`bin2hext`)
     and whitespace-tolerant hex decoding.
-    - `direction="bin_to_hex"` (or `"-b"`): Converts a binary file (or `[byte_offset, byte_length]`
-      slice) into a hexadecimal text file in `<project>/output/` so LLMs or external SysEx/ROM tools
-      can read, search, and edit it as text.
+    - `direction="bin_to_hex"` (or `"-b"`): Converts a binary file (or `[byte_offset, byte_length]` /
+      `[virtual_address, byte_length]` slice) into a hexadecimal text file in `<project>/output/`
+      so LLMs or external SysEx/ROM tools can read, search, and edit it as text.
       `hex_format` can be `"raw"` (continuous uppercase hex via `bin2hext -b`), `"spaced"` (16
       space-separated uppercase hex bytes per line), or `"canonical"` (`xxd` offset+hex+ASCII).
     - `direction="hex_to_bin"` (or `"-h"`): Converts a hexadecimal text file back into a binary
@@ -723,6 +906,11 @@ def binary_hex_convert(
 
     if dir_norm in ("bin_to_hex", "-b", "b", "to_hex"):
         raw_bytes = target.read_bytes()
+        va_note = ""
+        if virtual_address:
+            resolved_off, va_desc = _resolve_va_or_rva_to_offset(raw_bytes, virtual_address)
+            byte_offset = resolved_off
+            va_note = f"\nVA Resolution: {va_desc}"
         if byte_offset > 0 or byte_length > 0:
             end_off = (byte_offset + byte_length) if byte_length > 0 else len(raw_bytes)
             raw_bytes = raw_bytes[byte_offset:end_off]
@@ -732,7 +920,7 @@ def binary_hex_convert(
         out_file = out_root / out_name
 
         if fmt == "raw":
-            if has_binhex_cli and byte_offset == 0 and byte_length == 0:
+            if has_binhex_cli and byte_offset == 0 and byte_length == 0 and not virtual_address:
                 res = _run_cmd([binhex_bin, "-b", str(target), str(out_file)], timeout=60)
                 if res["returncode"] != 0:
                     out_file.write_text(raw_bytes.hex().upper(), encoding="utf-8")
@@ -1027,15 +1215,30 @@ def diec_detect(file_path: str, show_entropy: bool = True) -> str:
 
 
 @mcp.tool()
-def pe_elf_headers(binary_path: str) -> str:
+def pe_elf_headers(binary_path: str, lookup_va: Optional[str] = None) -> str:
     """
-    Deeply inspect PE/ELF/Mach-O headers, sections with true Shannon entropy (0.00-8.00) to spot
-    packed/encrypted sections, PE Rich headers, TLS callbacks, PE resource tables, overlay data,
-    exports, and Authenticode signature status using LIEF, pefile, pyelftools, and rabin2.
+    Deeply inspect PE/ELF/Mach-O headers, sections with Virtual Address (VA), Relative Virtual
+    Address (RVA), Raw File Offset (`PointerToRawData` / `sh_offset`), Virtual/Raw sizes, and true
+    Shannon entropy (0.00-8.00), plus PE Rich headers, TLS callbacks, PE resource tables, overlay
+    data, exports, and Authenticode signature status.
+    Pass `lookup_va` (e.g. `lookup_va="0x870b50, 0x8714e0"`) to directly resolve one or more
+    comma-separated Virtual Addresses (VA) or RVAs to their exact raw file byte offsets.
     """
     target = _validate_path(binary_path)
     data = target.read_bytes()
     out_parts = []
+
+    if lookup_va:
+        va_lines = ["=== Virtual Address (VA / RVA) -> Raw File Offset Resolution ==="]
+        for token in re.split(r"[,;\s]+", lookup_va.strip()):
+            if not token:
+                continue
+            try:
+                _, desc = _resolve_va_or_rva_to_offset(data, token)
+                va_lines.append(f"  {desc}")
+            except Exception as exc:
+                va_lines.append(f"  {token}: [Resolution Error: {exc}]")
+        out_parts.append("\n".join(va_lines))
 
     if data[:2] == b"MZ":
         try:
@@ -1044,8 +1247,8 @@ def pe_elf_headers(binary_path: str) -> str:
             pe = pefile.PE(data=data, fast_load=False)
             img_base = pe.OPTIONAL_HEADER.ImageBase
             sec_lines = [
-                f"=== PE Sections & Shannon Entropy (ImageBase: 0x{img_base:x}) ===",
-                f"  {'Name':<10} {'VAddr':<14} {'VSize':<10} {'RawSize':<10} {'Entropy':<9} {'Flags'}",
+                f"=== PE Sections, Raw File Offsets & Shannon Entropy (ImageBase: 0x{img_base:x}) ===",
+                f"  {'Name':<10} {'VAddr (VA)':<14} {'RVA':<12} {'VSize':<12} {'RawOffset':<12} {'RawSize':<12} {'Entropy':<9} {'Flags'}",
             ]
             for sec in pe.sections:
                 sec_name = sec.Name.rstrip(b"\x00").decode("ascii", errors="replace")
@@ -1059,7 +1262,9 @@ def pe_elf_headers(binary_path: str) -> str:
                 ])
                 sec_lines.append(
                     f"  {sec_name:<10} 0x{img_base + sec.VirtualAddress:012x} "
-                    f"{sec.Misc_VirtualSize:<10} {sec.SizeOfRawData:<10} {ent:5.2f}/8.0  {rwx}{flag_note}"
+                    f"0x{sec.VirtualAddress:08x}   0x{sec.Misc_VirtualSize:08x}   "
+                    f"0x{sec.PointerToRawData:08x}   0x{sec.SizeOfRawData:08x}   "
+                    f"{ent:5.2f}/8.0  {rwx}{flag_note}"
                 )
 
             overlay_off = pe.get_overlay_data_start_offset()
@@ -1112,15 +1317,16 @@ def pe_elf_headers(binary_path: str) -> str:
             with io.BytesIO(data) as bio:
                 elf = ELFFile(bio)
                 sec_lines = [
-                    f"=== ELF Sections & Shannon Entropy ({elf.get_machine_arch()}, {elf.elfclass}-bit) ===",
-                    f"  {'Name':<18} {'VAddr':<14} {'Size':<10} {'Entropy':<9}",
+                    f"=== ELF Sections, File Offsets & Shannon Entropy ({elf.get_machine_arch()}, {elf.elfclass}-bit) ===",
+                    f"  {'Name':<18} {'VAddr':<14} {'FileOffset':<12} {'Size':<12} {'Entropy':<9}",
                 ]
                 for sec in elf.iter_sections():
                     sdata = sec.data()
                     ent = _shannon_entropy(sdata)
                     flag_note = " [HIGH ENTROPY]" if ent >= 6.8 and len(sdata) > 512 else ""
                     sec_lines.append(
-                        f"  {sec.name[:18]:<18} 0x{sec['sh_addr']:012x} {sec['sh_size']:<10} {ent:5.2f}/8.0{flag_note}"
+                        f"  {sec.name[:18]:<18} 0x{sec['sh_addr']:012x} 0x{sec['sh_offset']:08x}   "
+                        f"0x{sec['sh_size']:08x}   {ent:5.2f}/8.0{flag_note}"
                     )
                 out_parts.append("\n".join(sec_lines))
         except Exception as exc:
@@ -1376,24 +1582,19 @@ def dsp56300_disassemble(
         )
         full_output = f"{header_meta}\n{disasm_text}"
 
-        if save_output or len(full_output) > 20000:
-            out_name = (
-                _safe_filename(output_filename)
-                if output_filename
-                else f"{target.stem}_dsp56300.asm"
-            )
-            out_path = _get_output_dir(target) / out_name
-            out_path.write_text(full_output, encoding="utf-8")
-            if len(full_output) > 20000:
-                return (
-                    f"Full DSP56300 disassembly ({line_count} lines, {len(full_output)} chars) "
-                    f"saved to: {out_path}\n"
-                    f"Use search_workspace_files or read_workspace_file to inspect the full listing.\n\n"
-                    f"Preview:\n{full_output[:15000]}\n... [truncated {len(full_output) - 15000} chars]"
-                )
-            return f"Saved DSP56300 disassembly to {out_path}\n\n{full_output}"
-
-        return full_output
+        out_name = (
+            _safe_filename(output_filename)
+            if output_filename
+            else f"{target.stem}_dsp56300.asm"
+        )
+        return _spill_or_preview_text(
+            full_output,
+            target,
+            out_name,
+            max_inline_chars=3500,
+            max_inline_lines=65,
+            force_save=save_output,
+        )
 
 
 @mcp.tool()
@@ -1473,9 +1674,9 @@ def capa_detect_capabilities(binary_path: str, timeout_seconds: int = 180) -> st
 
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
     output = (res.stdout or res.stderr).strip()
-    if len(output) > 20000:
-        return output[:20000] + f"\n... [truncated {len(output) - 20000} chars]"
-    return output or "No capabilities detected by capa."
+    if not output:
+        return "No capabilities detected by capa."
+    return _spill_or_preview_text(output, target, f"{target.stem}_capa.txt")
 
 
 @mcp.tool()
@@ -1489,15 +1690,15 @@ def archive_list(archive_path: str) -> str:
 
     if target.suffix.lower() in {".squashfs", ".sqsh"} or data_head[:4] == b"hsqs":
         res = subprocess.run(["unsquashfs", "-ll", str(target)], capture_output=True, text=True, timeout=30)
-        return (res.stdout or res.stderr).strip()[:15000]
+        return _spill_or_preview_text((res.stdout or res.stderr).strip(), target, f"{target.stem}_archive_list.txt")
 
     if shutil.which("innoextract"):
         inno = subprocess.run(["innoextract", "-l", str(target)], capture_output=True, text=True, timeout=30)
         if inno.returncode == 0:
-            return inno.stdout.strip()[:15000]
+            return _spill_or_preview_text(inno.stdout.strip(), target, f"{target.stem}_archive_list.txt")
 
     res = subprocess.run(["7z", "l", "-y", str(target)], capture_output=True, text=True, timeout=30)
-    return (res.stdout or res.stderr).strip()[:15000]
+    return _spill_or_preview_text((res.stdout or res.stderr).strip(), target, f"{target.stem}_archive_list.txt")
 
 
 @mcp.tool()
@@ -1566,7 +1767,7 @@ def binwalk_scan(file_path: str, extract: bool = False) -> str:
     output = res.stdout.strip()
     if extract:
         output += f"\n\n[Extracted files saved under {out_dir}]"
-    return output
+    return _spill_or_preview_text(output, target, f"{target.stem}_binwalk.txt")
 
 
 @mcp.tool()
@@ -1616,9 +1817,7 @@ def floss_extract_strings(
     if res.returncode != 0 and not res.stdout:
         return f"Error executing floss: {res.stderr}"
     out = res.stdout.strip()
-    if len(out) > 20000:
-        return out[:20000] + f"\n... [truncated {len(out) - 20000} chars]"
-    return out
+    return _spill_or_preview_text(out, target, f"{target.stem}_floss_strings.txt")
 
 
 # =====================================================================
@@ -1656,9 +1855,7 @@ def r2_imports_exports_sections(binary_path: str) -> str:
         timeout=30
     )
     out = (res.stdout or res.stderr).strip()
-    if len(out) > 20000:
-        return out[:20000] + f"\n... [truncated {len(out) - 20000} chars]"
-    return out
+    return _spill_or_preview_text(out, target, f"{target.stem}_imports_exports_sections.txt")
 
 
 @mcp.tool()
@@ -1755,7 +1952,8 @@ def r2_xrefs(
         text=True,
         timeout=120
     )
-    return (res.stdout or res.stderr).strip() or f"No cross-references found for {target_addr_or_name}."
+    out = (res.stdout or res.stderr).strip() or f"No cross-references found for {target_addr_or_name}."
+    return _spill_or_preview_text(out, target, f"{target.stem}_xrefs_{target_addr_or_name}.txt")
 
 
 @mcp.tool()
@@ -1774,7 +1972,8 @@ def r2_callgraph(binary_path: str, function_name_or_addr: str) -> str:
         text=True,
         timeout=90
     )
-    return (res.stdout or res.stderr).strip() or "No callgraph generated."
+    out = (res.stdout or res.stderr).strip() or "No callgraph generated."
+    return _spill_or_preview_text(out, target, f"{target.stem}_callgraph_{function_name_or_addr}.json")
 
 
 @mcp.tool()
@@ -1812,7 +2011,8 @@ def r2_disassemble_function(
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
     if result.returncode != 0 and not result.stdout:
         return f"Error executing r2: {result.stderr}"
-    return result.stdout.strip() or "No disassembly generated. Verify the function identifier."
+    out = result.stdout.strip() or "No disassembly generated. Verify the function identifier."
+    return _spill_or_preview_text(out, target, f"{target.stem}_{function_name_or_addr}_r2.asm")
 
 
 @mcp.tool()
@@ -1838,7 +2038,8 @@ def r2_decompile_function(
         text=True,
         timeout=90
     )
-    return result.stdout.strip() or f"Error generating pseudocode: {result.stderr}"
+    out = result.stdout.strip() or f"Error generating pseudocode: {result.stderr}"
+    return _spill_or_preview_text(out, target, f"{target.stem}_{function_name_or_addr}_pdc.c")
 
 
 # =====================================================================
@@ -1913,7 +2114,7 @@ def ghidra_decompile_function(
         if "=== GHIDRA_DECOMP_START ===" in combined:
             body = combined.split("=== GHIDRA_DECOMP_START ===", 1)[1]
             body = body.split("=== GHIDRA_DECOMP_END ===", 1)[0].strip()
-            return body
+            return _spill_or_preview_text(body, target, f"{target.stem}_{function_name_or_addr}_ghidra.c")
         for line in combined.splitlines():
             if "ERROR:" in line:
                 return line.strip()
@@ -2073,7 +2274,8 @@ def jadx_extract_manifest(apk_path: str) -> str:
 
         manifest_path = Path(tmp_dir) / "resources" / "AndroidManifest.xml"
         if manifest_path.exists():
-            return manifest_path.read_text(encoding="utf-8", errors="replace")
+            text = manifest_path.read_text(encoding="utf-8", errors="replace")
+            return _spill_or_preview_text(text, target, f"{target.stem}_AndroidManifest.xml")
         return "AndroidManifest.xml not found in decompiled output."
 
 
@@ -2125,7 +2327,8 @@ def jadx_decompile_class(apk_path: str, class_fqn: str) -> str:
     target = _validate_path(apk_path)
     cached_file = _get_output_dir(target) / f"{target.stem}_jadx" / "sources" / (class_fqn.replace(".", "/") + ".java")
     if cached_file.exists():
-        return cached_file.read_text(encoding="utf-8", errors="replace")
+        text = cached_file.read_text(encoding="utf-8", errors="replace")
+        return _spill_or_preview_text(text, target, f"{target.stem}_{class_fqn}.java")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         cmd = [
@@ -2141,11 +2344,13 @@ def jadx_decompile_class(apk_path: str, class_fqn: str) -> str:
         decompiled_file = Path(tmp_dir) / relative_java_path
 
         if decompiled_file.exists():
-            return decompiled_file.read_text(encoding="utf-8", errors="replace")
+            text = decompiled_file.read_text(encoding="utf-8", errors="replace")
+            return _spill_or_preview_text(text, target, f"{target.stem}_{class_fqn}.java")
 
         matches = list(Path(tmp_dir).glob(f"**/{class_fqn.split('.')[-1]}.java"))
         if matches:
-            return matches[0].read_text(encoding="utf-8", errors="replace")
+            text = matches[0].read_text(encoding="utf-8", errors="replace")
+            return _spill_or_preview_text(text, target, f"{target.stem}_{class_fqn}.java")
 
         return f"Class '{class_fqn}' could not be located in output. stderr: {res.stderr}"
 
@@ -2214,7 +2419,7 @@ def dotnet_list_types(assembly_path: str) -> str:
     )
     if res.returncode != 0 and not res.stdout:
         return f"ilspycmd failed: {res.stderr}"
-    return res.stdout.strip()
+    return _spill_or_preview_text(res.stdout.strip(), target, f"{target.stem}_dotnet_types.txt")
 
 
 @mcp.tool()
@@ -2239,7 +2444,7 @@ def dotnet_decompile(
             timeout=90
         )
         out = (res.stdout or res.stderr).strip()
-        return out[:20000] if len(out) > 20000 else out
+        return _spill_or_preview_text(out, target, f"{target.stem}_{type_name}.cs")
 
     folder_name = _safe_filename(output_name) if output_name else f"{target.stem}_dotnet_src"
     out_dir = _get_output_dir(target) / folder_name
@@ -2323,7 +2528,7 @@ def pyc_decompile(pyc_path: str) -> str:
     if not out and shutil.which("pycdas"):
         dis = subprocess.run(["pycdas", str(target)], capture_output=True, text=True, timeout=45)
         out = f"// pycdc decompilation incomplete; bytecode disassembly (pycdas):\n{dis.stdout}"
-    return out[:20000] if len(out) > 20000 else (out or res.stderr)
+    return _spill_or_preview_text(out or res.stderr, target, f"{target.stem}_decompiled.py")
 
 
 # =====================================================================
@@ -2395,11 +2600,7 @@ def wasm_decompile(wasm_path: str, mode: str = "decompile") -> str:
 
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     out = (res.stdout or res.stderr).strip()
-    if len(out) > 20000:
-        out_file = _get_output_dir(target) / f"{target.stem}.{mode}.txt"
-        out_file.write_text(out, encoding="utf-8")
-        return f"Full output saved to {out_file} ({len(out)} chars).\n\nPreview:\n{out[:15000]}"
-    return out
+    return _spill_or_preview_text(out, target, f"{target.stem}.{mode}.txt")
 
 
 # =====================================================================
@@ -2565,7 +2766,7 @@ def dynamic_trace_syscalls(
                 + ((exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")))
             )
 
-        return out.strip()[-15000:]
+        return _spill_or_preview_text(out.strip(), target, f"{target.stem}_{tracer}_trace.txt")
 
 
 @mcp.tool()
@@ -2596,7 +2797,674 @@ def gdb_analyze(
 
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
     out = ((res.stdout or "") + "\n" + (res.stderr or "")).strip()
-    return out[:20000] if len(out) > 20000 else (out or "No output returned by debugger.")
+    if not out:
+        return "No output returned by debugger."
+    return _spill_or_preview_text(out, target, f"{target.stem}_{debugger}_batch.txt")
+
+
+# =====================================================================
+# CyberChef-Style Crypto, Custom S-Box/P-Box & Data Transform Tools
+# =====================================================================
+
+def _clean_hex_bytes(hex_str: str) -> bytes:
+    cleaned = re.sub(r"0x", "", hex_str, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[^0-9A-Fa-f]", "", cleaned)
+    if len(cleaned) % 2 != 0:
+        raise ValueError(f"Odd-length hex string ({len(cleaned)} hex chars) after stripping whitespace.")
+    return bytes.fromhex(cleaned)
+
+
+def _blowfish_F(xl: int, S: list[list[int]]) -> int:
+    a = (xl >> 24) & 0xFF
+    b = (xl >> 16) & 0xFF
+    c = (xl >> 8) & 0xFF
+    d = xl & 0xFF
+    y = (S[0][a] + S[1][b]) & 0xFFFFFFFF
+    y = (y ^ S[2][c]) & 0xFFFFFFFF
+    y = (y + S[3][d]) & 0xFFFFFFFF
+    return y
+
+
+def _blowfish_encipher_block(xl: int, xr: int, P: list[int], S: list[list[int]]) -> tuple[int, int]:
+    for i in range(16):
+        xl = (xl ^ P[i]) & 0xFFFFFFFF
+        xr = (_blowfish_F(xl, S) ^ xr) & 0xFFFFFFFF
+        xl, xr = xr, xl
+    xl, xr = xr, xl
+    xr = (xr ^ P[16]) & 0xFFFFFFFF
+    xl = (xl ^ P[17]) & 0xFFFFFFFF
+    return xl, xr
+
+
+def _blowfish_decipher_block(xl: int, xr: int, P: list[int], S: list[list[int]]) -> tuple[int, int]:
+    for i in range(17, 1, -1):
+        xl = (xl ^ P[i]) & 0xFFFFFFFF
+        xr = (_blowfish_F(xl, S) ^ xr) & 0xFFFFFFFF
+        xl, xr = xr, xl
+    xl, xr = xr, xl
+    xr = (xr ^ P[1]) & 0xFFFFFFFF
+    xl = (xl ^ P[0]) & 0xFFFFFFFF
+    return xl, xr
+
+
+def _blowfish_key_schedule(key: bytes, P: list[int], S: list[list[int]]) -> None:
+    if not key:
+        return
+    klen = len(key)
+    kidx = 0
+    for i in range(18):
+        word = 0
+        for _ in range(4):
+            word = ((word << 8) | key[kidx]) & 0xFFFFFFFF
+            kidx = (kidx + 1) % klen
+        P[i] = (P[i] ^ word) & 0xFFFFFFFF
+
+    datal, datar = 0, 0
+    for i in range(0, 18, 2):
+        datal, datar = _blowfish_encipher_block(datal, datar, P, S)
+        P[i] = datal
+        P[i + 1] = datar
+
+    for s_idx in range(4):
+        for j in range(0, 256, 2):
+            datal, datar = _blowfish_encipher_block(datal, datar, P, S)
+            S[s_idx][j] = datal
+            S[s_idx][j + 1] = datar
+
+
+@mcp.tool()
+def crypto_and_data_transform(
+    algorithm: str = "blowfish",
+    operation: str = "decrypt",
+    mode: str = "ECB",
+    input_hex: Optional[str] = None,
+    input_ascii: Optional[str] = None,
+    file_path: Optional[str] = None,
+    virtual_address: Optional[str] = None,
+    byte_offset: int = 0,
+    byte_length: int = 256,
+    key_hex: Optional[str] = None,
+    key_ascii: Optional[str] = None,
+    key_va: Optional[str] = None,
+    key_length: int = 0,
+    iv_hex: Optional[str] = None,
+    box_file_path: Optional[str] = None,
+    pbox_va: Optional[str] = None,
+    pbox_offset: Optional[int] = None,
+    sbox_va: Optional[str] = None,
+    sbox_offset: Optional[int] = None,
+    box_endian: str = "le",
+    block_endian: str = "be",
+    apply_key_schedule: bool = True,
+    output_filename: Optional[str] = None,
+) -> str:
+    """
+    CyberChef-style cryptographic cipher, custom S-box/P-box, compression, and endian data transform
+    tool for decoding binary tables, firmware blocks, and obfuscated payloads directly from hex or
+    binary Virtual Addresses (VA/RVA) / file offsets.
+
+    Supported `algorithm` values:
+    - `"blowfish"`: Standard Blowfish (`ECB`, `CBC`, `CFB`, `OFB`, `CTR`). Set `block_endian="le"`
+      for x86 C/C++ implementations that cast 8-byte blocks directly as little-endian `uint32_t[2]`.
+    - `"blowfish_custom_boxes"`: Pure-Python Blowfish that loads custom 18-entry P-box (72 B) and
+      4x256-entry S-boxes (4096 B) directly from `box_file_path` (or `file_path`) at `pbox_va` /
+      `pbox_offset` and `sbox_va` / `sbox_offset` (defaults to `pbox + 72` if omitted). Supports
+      `box_endian="le"|"be"`, `block_endian="le"|"be"`, and `apply_key_schedule=True|False`.
+    - `"rc4"` (or `"arc4"`): RC4 stream cipher.
+    - `"aes"`: AES-128/192/256 (`ECB`, `CBC`, `CFB`, `OFB`, `CTR`).
+    - `"des"`, `"3des"`: DES / Triple-DES (`ECB`, `CBC`).
+    - `"chacha20"`: ChaCha20 stream cipher (`iv_hex` used as 8- or 12-byte nonce).
+    - `"xor"`: Repeating-key XOR using `key_hex`, `key_ascii`, or `key_va`.
+    - `"zlib"`, `"raw_deflate"`, `"lzma"`: Decompress (`operation="decrypt"`) or compress (`"encrypt"`).
+    - `"swap32"`, `"swap16"`: Swap 32-bit or 16-bit word endianness across the buffer.
+    - `"hashes"`: Compute CRC32, MD5, SHA-1, and SHA-256 of the input slice.
+    """
+    import struct
+    import zlib
+    import lzma
+    from Crypto.Cipher import AES, ARC4, Blowfish, ChaCha20, DES, DES3
+    from Crypto.Util import Counter
+
+    notes: list[str] = []
+    file_bytes: Optional[bytes] = None
+    target_path: Optional[Path] = None
+
+    if file_path:
+        target_path = _validate_path(file_path)
+        file_bytes = target_path.read_bytes()
+
+    # 1. Resolve input payload
+    if input_hex is not None:
+        payload = _clean_hex_bytes(input_hex)
+        notes.append(f"Input: {len(payload)} bytes from input_hex")
+    elif input_ascii is not None:
+        payload = input_ascii.encode("utf-8")
+        notes.append(f"Input: {len(payload)} bytes from input_ascii")
+    elif file_bytes is not None:
+        if virtual_address:
+            resolved_off, va_desc = _resolve_va_or_rva_to_offset(file_bytes, virtual_address)
+            byte_offset = resolved_off
+            notes.append(f"Input VA Resolution: {va_desc}")
+        payload = file_bytes[byte_offset : byte_offset + max(1, byte_length)]
+        notes.append(
+            f"Input: {len(payload)} bytes from {target_path.name} @ offset 0x{byte_offset:X}"
+        )
+    else:
+        raise ValueError("Provide either input_hex, input_ascii, or file_path (+ byte_offset / virtual_address).")
+
+    # 2. Resolve key & IV if provided
+    key_bytes = b""
+    if key_hex:
+        key_bytes = _clean_hex_bytes(key_hex)
+    elif key_ascii:
+        key_bytes = key_ascii.encode("utf-8")
+    elif key_va and file_bytes is not None:
+        k_off, k_desc = _resolve_va_or_rva_to_offset(file_bytes, key_va)
+        if key_length > 0:
+            key_bytes = file_bytes[k_off : k_off + key_length]
+        else:
+            # Read null-terminated key up to 56 bytes
+            end_k = file_bytes.find(b"\x00", k_off, k_off + 256)
+            key_bytes = file_bytes[k_off : (end_k if end_k != -1 else k_off + 16)]
+        notes.append(f"Key VA Resolution: {k_desc} ({len(key_bytes)} bytes: {key_bytes.hex().upper()})")
+
+    iv_bytes = _clean_hex_bytes(iv_hex) if iv_hex else b""
+    alg = algorithm.strip().lower()
+    op = operation.strip().lower()
+    mode_norm = mode.strip().upper()
+    blk_le = block_endian.strip().lower() == "le"
+    bx_le = box_endian.strip().lower() == "le"
+
+    def _swap32_blocks(buf: bytes) -> bytes:
+        rem = len(buf) % 4
+        aligned = buf[: len(buf) - rem]
+        count = len(aligned) // 4
+        words = struct.unpack(f"<{count}I", aligned)
+        return struct.pack(f">{count}I", *words) + buf[len(buf) - rem :]
+
+    # 3. Execute transform
+    if alg == "hashes":
+        crc = zlib.crc32(payload) & 0xFFFFFFFF
+        return "\n".join([
+            "=== Cryptographic Hashes & Checksums ===",
+            *notes,
+            f"Length:  {len(payload)} bytes (0x{len(payload):X})",
+            f"CRC32:   0x{crc:08X}",
+            f"MD5:     {hashlib.md5(payload).hexdigest()}",
+            f"SHA-1:   {hashlib.sha1(payload).hexdigest()}",
+            f"SHA-256: {hashlib.sha256(payload).hexdigest()}",
+        ])
+
+    elif alg == "xor":
+        if not key_bytes:
+            raise ValueError("XOR requires key_hex, key_ascii, or key_va.")
+        klen = len(key_bytes)
+        result = bytes(b ^ key_bytes[i % klen] for i, b in enumerate(payload))
+
+    elif alg == "swap32":
+        result = _swap32_blocks(payload)
+
+    elif alg == "swap16":
+        rem = len(payload) % 2
+        aligned = payload[: len(payload) - rem]
+        count = len(aligned) // 2
+        words = struct.unpack(f"<{count}H", aligned)
+        result = struct.pack(f">{count}H", *words) + payload[len(payload) - rem :]
+
+    elif alg in ("zlib", "raw_deflate", "lzma"):
+        if op in ("encrypt", "compress"):
+            if alg == "zlib":
+                result = zlib.compress(payload)
+            elif alg == "raw_deflate":
+                comp = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -zlib.MAX_WBITS)
+                result = comp.compress(payload) + comp.flush()
+            else:
+                result = lzma.compress(payload)
+        else:
+            if alg == "zlib":
+                result = zlib.decompress(payload)
+            elif alg == "raw_deflate":
+                result = zlib.decompress(payload, -zlib.MAX_WBITS)
+            else:
+                result = lzma.decompress(payload)
+
+    elif alg in ("rc4", "arc4"):
+        if not key_bytes:
+            raise ValueError("RC4 requires key_hex, key_ascii, or key_va.")
+        cipher = ARC4.new(key_bytes)
+        result = cipher.decrypt(payload) if op == "decrypt" else cipher.encrypt(payload)
+
+    elif alg == "chacha20":
+        if len(key_bytes) != 32:
+            raise ValueError(f"ChaCha20 requires a 32-byte key (got {len(key_bytes)} bytes).")
+        nonce = iv_bytes or (b"\x00" * 8)
+        cipher = ChaCha20.new(key=key_bytes, nonce=nonce)
+        result = cipher.decrypt(payload) if op == "decrypt" else cipher.encrypt(payload)
+
+    elif alg == "blowfish_custom_boxes":
+        box_src_bytes = (
+            _validate_path(box_file_path).read_bytes() if box_file_path else file_bytes
+        )
+        if box_src_bytes is None:
+            raise ValueError("blowfish_custom_boxes requires box_file_path or file_path.")
+
+        if pbox_va:
+            p_off, p_desc = _resolve_va_or_rva_to_offset(box_src_bytes, pbox_va)
+            notes.append(f"P-Box VA Resolution: {p_desc}")
+        elif pbox_offset is not None:
+            p_off = pbox_offset
+            notes.append(f"P-Box Offset: 0x{p_off:X}")
+        else:
+            raise ValueError("blowfish_custom_boxes requires pbox_va or pbox_offset.")
+
+        if sbox_va:
+            s_off, s_desc = _resolve_va_or_rva_to_offset(box_src_bytes, sbox_va)
+            notes.append(f"S-Box VA Resolution: {s_desc}")
+        elif sbox_offset is not None:
+            s_off = sbox_offset
+            notes.append(f"S-Box Offset: 0x{s_off:X}")
+        else:
+            s_off = p_off + 72
+            notes.append(f"S-Box Offset: 0x{s_off:X} (contiguous after 72-byte P-Box)")
+
+        endian_fmt = "<" if bx_le else ">"
+        P = list(struct.unpack(f"{endian_fmt}18I", box_src_bytes[p_off : p_off + 72]))
+        S: list[list[int]] = []
+        for s_idx in range(4):
+            sb_start = s_off + s_idx * 1024
+            S.append(list(struct.unpack(f"{endian_fmt}256I", box_src_bytes[sb_start : sb_start + 1024])))
+
+        notes.append(
+            f"Loaded Custom P-Box (P[0]=0x{P[0]:08X}, P[1]=0x{P[1]:08X}) & 4x256 S-Boxes (S0[0]=0x{S[0][0]:08X}) "
+            f"[box_endian={'LE' if bx_le else 'BE'}, block_endian={'LE' if blk_le else 'BE'}]"
+        )
+
+        if key_bytes and apply_key_schedule:
+            _blowfish_key_schedule(key_bytes, P, S)
+            notes.append(f"Applied Blowfish key schedule with {len(key_bytes)}-byte key.")
+
+        blk_fmt = "<2I" if blk_le else ">2I"
+        aligned_len = (len(payload) // 8) * 8
+        out_chunks: list[bytes] = []
+        prev_l, prev_r = (
+            struct.unpack(blk_fmt, iv_bytes[:8]) if len(iv_bytes) >= 8 else (0, 0)
+        )
+
+        for i in range(0, aligned_len, 8):
+            blk = payload[i : i + 8]
+            xl, xr = struct.unpack(blk_fmt, blk)
+            if op == "encrypt":
+                if mode_norm == "CBC":
+                    xl ^= prev_l
+                    xr ^= prev_r
+                yl, yr = _blowfish_encipher_block(xl, xr, P, S)
+                if mode_norm == "CBC":
+                    prev_l, prev_r = yl, yr
+            else:
+                yl, yr = _blowfish_decipher_block(xl, xr, P, S)
+                if mode_norm == "CBC":
+                    yl ^= prev_l
+                    yr ^= prev_r
+                    prev_l, prev_r = xl, xr
+            out_chunks.append(struct.pack(blk_fmt, yl, yr))
+
+        result = b"".join(out_chunks) + payload[aligned_len:]
+
+    elif alg in ("blowfish", "aes", "des", "3des"):
+        if not key_bytes:
+            raise ValueError(f"{alg.upper()} requires key_hex, key_ascii, or key_va.")
+
+        mod_map = {"blowfish": Blowfish, "aes": AES, "des": DES, "3des": DES3}
+        cmod = mod_map[alg]
+        bsize = cmod.block_size
+        aligned_len = (len(payload) // bsize) * bsize
+        work = payload[:aligned_len]
+        if alg == "blowfish" and blk_le:
+            work = _swap32_blocks(work)
+
+        if mode_norm == "ECB":
+            cipher = cmod.new(key_bytes, cmod.MODE_ECB)
+        elif mode_norm == "CBC":
+            iv = iv_bytes[:bsize] if iv_bytes else (b"\x00" * bsize)
+            if alg == "blowfish" and blk_le:
+                iv = _swap32_blocks(iv)
+            cipher = cmod.new(key_bytes, cmod.MODE_CBC, iv=iv)
+        elif mode_norm == "CFB":
+            iv = iv_bytes[:bsize] if iv_bytes else (b"\x00" * bsize)
+            cipher = cmod.new(key_bytes, cmod.MODE_CFB, iv=iv, segment_size=bsize * 8)
+            work = payload
+        elif mode_norm == "OFB":
+            iv = iv_bytes[:bsize] if iv_bytes else (b"\x00" * bsize)
+            cipher = cmod.new(key_bytes, cmod.MODE_OFB, iv=iv)
+            work = payload
+        elif mode_norm == "CTR":
+            init_val = int.from_bytes(iv_bytes[:bsize], "big") if iv_bytes else 0
+            ctr = Counter.new(bsize * 8, initial_value=init_val)
+            cipher = cmod.new(key_bytes, cmod.MODE_CTR, counter=ctr)
+            work = payload
+        else:
+            raise ValueError(f"Unsupported mode '{mode}' for {alg}. Use ECB, CBC, CFB, OFB, or CTR.")
+
+        transformed = cipher.decrypt(work) if op == "decrypt" else cipher.encrypt(work)
+        if alg == "blowfish" and blk_le and mode_norm in ("ECB", "CBC"):
+            transformed = _swap32_blocks(transformed)
+        result = transformed + (payload[aligned_len:] if mode_norm in ("ECB", "CBC") else b"")
+    else:
+        raise ValueError(
+            f"Unsupported algorithm '{algorithm}'. Choose 'blowfish', 'blowfish_custom_boxes', "
+            "'rc4', 'aes', 'des', '3des', 'chacha20', 'xor', 'zlib', 'raw_deflate', 'lzma', "
+            "'swap32', 'swap16', or 'hashes'."
+        )
+
+    out_root = _get_output_dir(target_path) if target_path else OUTPUT_DIR
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    # Format full canonical hex + ASCII dump
+    full_dump_lines: list[str] = []
+    for i in range(0, len(result), 16):
+        row = result[i : i + 16]
+        left_h = " ".join(f"{b:02X}" for b in row[:8])
+        right_h = " ".join(f"{b:02X}" for b in row[8:])
+        hex_col = f"{left_h}  {right_h}" if right_h else left_h
+        ascii_col = "".join(chr(b) if 0x20 <= b <= 0x7E else "." for b in row)
+        full_dump_lines.append(f"{i:08X}:  {hex_col:<48}  |{ascii_col}|")
+
+    saved_notes: list[str] = []
+    if output_filename or len(result) > 256:
+        stem = target_path.stem if target_path else "payload"
+        bin_name = _safe_filename(output_filename or f"{stem}_{alg}_{op}_{len(result)}B.bin")
+        bin_file = out_root / bin_name
+        bin_file.write_bytes(result)
+        hex_file = out_root / _safe_filename(f"{bin_name}.hex.txt")
+        hex_file.write_text("\n".join(full_dump_lines) + "\n", encoding="utf-8")
+        saved_notes.append(f"Auto-saved raw transformed binary ({len(result)} B) to: {bin_file}")
+        saved_notes.append(f"Auto-saved full hex+ASCII dump ({len(full_dump_lines)} lines) to: {hex_file}")
+
+    preview_lines = full_dump_lines[:16]
+    raw_preview_len = min(len(result), 128)
+
+    return "\n".join([
+        f"=== Crypto & Data Transform ({alg.upper()} / {op.upper()} / {mode_norm}) ===",
+        *notes,
+        f"Output Size: {len(result)} bytes (Shannon Entropy: {_shannon_entropy(result):.2f}/8.00)",
+        *saved_notes,
+        "",
+        f"--- Canonical Hex + ASCII Preview (first {min(len(result), 256)} B) ---",
+        "\n".join(preview_lines),
+        *(
+            [f"... [omitted {len(result) - 256} B ({len(full_dump_lines) - 16} lines) from LLM context — full dump in {hex_file}]"]
+            if len(result) > 256
+            else []
+        ),
+        "",
+        f"--- Raw Hex (first {raw_preview_len} B) ---",
+        result[:raw_preview_len].hex().upper() + ("..." if len(result) > raw_preview_len else ""),
+    ])
+
+
+# =====================================================================
+# Algorithm / Function Reimplementation Skeleton Generator
+# =====================================================================
+
+@mcp.tool()
+def generate_algorithm_skeleton(
+    binary_path: str,
+    function_name_or_addr: str,
+    target_language: str = "python",
+    table_vas: Optional[str] = None,
+    output_filename: Optional[str] = None,
+) -> str:
+    """
+    Generate a runnable Python (`.py`) or C# (`.cs`) algorithm reimplementation skeleton from a
+    binary function's Control Flow Graph (CFG), decompiled pseudocode, immediate constants, and
+    referenced `.rdata`/`.data` lookup tables.
+    - `function_name_or_addr`: Function symbol or hex VA (e.g. `'0x401500'`, `'fcn.00401500'`).
+    - `target_language`: `'python'` (default) or `'csharp'`.
+    - `table_vas`: Optional comma-separated `VA[:byte_length]` entries (e.g. `'0x870b50:256, 0x8714e0:72'`)
+      to extract from the binary and embed directly as byte array constants in the generated skeleton.
+    """
+    target = _validate_path(binary_path)
+    data = target.read_bytes()
+    lang = target_language.strip().lower()
+    if lang not in ("python", "py", "csharp", "cs", "c#"):
+        raise ValueError("target_language must be 'python' or 'csharp'.")
+    is_py = lang in ("python", "py")
+
+    # 1. Extract CFG (agfj) and pseudocode (pdc) from Radare2
+    r2_cmd = (
+        f"e scr.color=0; aa; s {function_name_or_addr}; af; "
+        f"echo ===CFG_JSON===; agfj; echo ===PDC===; pdc"
+    )
+    res = subprocess.run(
+        ["r2", "-q", "-c", r2_cmd, str(target)],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    stdout = res.stdout or ""
+    cfg_json_str = ""
+    pdc_str = ""
+    if "===CFG_JSON===" in stdout and "===PDC===" in stdout:
+        after_cfg = stdout.split("===CFG_JSON===", 1)[1]
+        cfg_json_str, pdc_str = after_cfg.split("===PDC===", 1)
+
+    blocks_summary: list[str] = []
+    discovered_vas: list[int] = []
+    imm_constants: set[int] = set()
+    func_title = re.sub(r"[^0-9A-Za-z_]", "_", function_name_or_addr.strip())
+
+    try:
+        cfg_list = json.loads(cfg_json_str.strip())
+        if cfg_list and isinstance(cfg_list, list):
+            func_obj = cfg_list[0]
+            blocks = func_obj.get("blocks", [])
+            for idx, blk in enumerate(blocks):
+                b_off = blk.get("offset", 0)
+                b_jump = blk.get("jump")
+                b_fail = blk.get("fail")
+                ops = blk.get("ops", [])
+                op_strs = []
+                for op in ops:
+                    dis = op.get("disasm") or op.get("opcode") or ""
+                    op_strs.append(f"0x{op.get('offset', 0):x}: {dis}")
+                    for m in re.finditer(r"0x([0-9a-fA-F]{4,16})", dis):
+                        val = int(m.group(1), 16)
+                        if val >= 0x100:
+                            imm_constants.add(val)
+                        if "[" in dis and val >= 0x400000:
+                            if val not in discovered_vas:
+                                discovered_vas.append(val)
+                edge_desc = []
+                if b_jump is not None:
+                    edge_desc.append(f"jump->0x{b_jump:x}")
+                if b_fail is not None:
+                    edge_desc.append(f"fail->0x{b_fail:x}")
+                edges = f" ({', '.join(edge_desc)})" if edge_desc else " (return/exit)"
+                blocks_summary.append(
+                    f"Block #{idx} @ 0x{b_off:x}{edges} [{len(ops)} insns]:\n"
+                    + "\n".join(f"    {line}" for line in op_strs[:25])
+                )
+    except Exception:
+        pass
+
+    # 2. Extract requested + auto-discovered lookup tables
+    extracted_tables: list[tuple[str, str, bytes]] = []
+    table_specs: list[tuple[str, int]] = []
+    if table_vas:
+        for tok in re.split(r"[,;\s]+", table_vas.strip()):
+            if not tok:
+                continue
+            if ":" in tok:
+                va_part, len_part = tok.split(":", 1)
+                table_specs.append((va_part.strip(), _parse_int_or_hex(len_part)))
+            else:
+                table_specs.append((tok.strip(), 64))
+    else:
+        for va_val in discovered_vas[:6]:
+            table_specs.append((f"0x{va_val:X}", 64))
+
+    for va_str, t_len in table_specs:
+        try:
+            raw_off, va_desc = _resolve_va_or_rva_to_offset(data, va_str)
+            if 0 <= raw_off < len(data):
+                t_bytes = data[raw_off : raw_off + min(max(1, t_len), 8192)]
+                sym_name = f"TABLE_{re.sub(r'[^0-9A-Fa-f]', '', va_str).upper()}"
+                extracted_tables.append((sym_name, va_desc, t_bytes))
+        except Exception:
+            continue
+
+    const_list = sorted(c for c in imm_constants if c not in (0xFFFFFFFF, 0xFFFF, 0xFF))[:30]
+    pdc_clean = pdc_str.strip()[:6000] if pdc_str.strip() else "No pdc output available."
+
+    # 3. Render target skeleton
+    if is_py:
+        ext = "py"
+        table_code = []
+        for sym, desc, tbytes in extracted_tables:
+            hex_literal = tbytes.hex().upper()
+            table_code.append(f"# {desc}\n{sym}: bytes = bytes.fromhex(\n    \"{hex_literal}\"\n)\n")
+
+        const_comments = ", ".join(f"0x{c:X}" for c in const_list) or "None"
+        cfg_comment = "\n".join(f"# {line}" for blk in blocks_summary for line in blk.splitlines())
+        pdc_comment = "\n".join(f"# {line}" for line in pdc_clean.splitlines())
+
+        skeleton = f'''#!/usr/bin/env python3
+"""
+Algorithm Reimplementation Skeleton for {target.name} :: {function_name_or_addr}
+Generated by redo (mat-ocl/redo)
+"""
+from __future__ import annotations
+import struct
+
+MASK32 = 0xFFFFFFFF
+MASK64 = 0xFFFFFFFFFFFFFFFF
+
+
+def u32(val: int) -> int:
+    return val & MASK32
+
+
+def rol32(val: int, shift: int) -> int:
+    s = shift & 31
+    val &= MASK32
+    return ((val << s) | (val >> (32 - s))) & MASK32
+
+
+def ror32(val: int, shift: int) -> int:
+    s = shift & 31
+    val &= MASK32
+    return ((val >> s) | (val << (32 - s))) & MASK32
+
+
+def read_u32_le(buf: bytes, offset: int = 0) -> int:
+    return struct.unpack_from("<I", buf, offset)[0]
+
+
+def read_u32_be(buf: bytes, offset: int = 0) -> int:
+    return struct.unpack_from(">I", buf, offset)[0]
+
+
+# === Extracted Binary Lookup Tables ===
+{chr(10).join(table_code) if table_code else "# (Pass table_vas='0xADDR:LEN' to embed .rdata/.data tables here)"}
+
+# === Immediate Constants Observed in Function ===
+# {const_comments}
+
+# === Control Flow Graph (CFG Basic Blocks) ===
+{cfg_comment or "# (No CFG blocks extracted)"}
+
+# === Radare2 Decompiled Pseudocode Reference ===
+{pdc_comment}
+
+
+def reimplemented_{func_title}(data: bytes, state: int = 0) -> bytes:
+    """
+    Reimplementation entry point for {function_name_or_addr}.
+    Translate the basic blocks above using u32(), rol32(), ror32(), and extracted tables.
+    """
+    buf = bytearray(data)
+    # TODO: Implement block transitions from CFG above
+    return bytes(buf)
+
+
+if __name__ == "__main__":
+    sample_input = b"\\x00" * 16
+    output = reimplemented_{func_title}(sample_input)
+    print(f"Output ({{len(output)}} B): {{output.hex().upper()}}")
+'''
+    else:
+        ext = "cs"
+        table_code = []
+        for sym, desc, tbytes in extracted_tables:
+            b_items = ", ".join(f"0x{b:02X}" for b in tbytes)
+            table_code.append(f"        // {desc}\n        public static readonly byte[] {sym} = new byte[] {{ {b_items} }};\n")
+
+        const_comments = ", ".join(f"0x{c:X}" for c in const_list) or "None"
+        cfg_comment = "\n".join(f"        // {line}" for blk in blocks_summary for line in blk.splitlines())
+        pdc_comment = "\n".join(f"        // {line}" for line in pdc_clean.splitlines())
+
+        skeleton = f'''using System;
+using System.Buffers.Binary;
+using System.Numerics;
+
+namespace RedoAlgorithmSkeleton
+{{
+    /// <summary>
+    /// Algorithm Reimplementation Skeleton for {target.name} :: {function_name_or_addr}
+    /// Generated by redo (mat-ocl/redo)
+    /// </summary>
+    public static class Algorithm_{func_title}
+    {{
+        public static uint Rol32(uint val, int shift) => BitOperations.RotateLeft(val, shift);
+        public static uint Ror32(uint val, int shift) => BitOperations.RotateRight(val, shift);
+        public static uint ReadU32LE(ReadOnlySpan<byte> buf, int offset = 0) => BinaryPrimitives.ReadUInt32LittleEndian(buf.Slice(offset, 4));
+        public static uint ReadU32BE(ReadOnlySpan<byte> buf, int offset = 0) => BinaryPrimitives.ReadUInt32BigEndian(buf.Slice(offset, 4));
+
+        // === Extracted Binary Lookup Tables ===
+{chr(10).join(table_code) if table_code else "        // (Pass table_vas=\"0xADDR:LEN\" to embed .rdata/.data tables here)"}
+
+        // === Immediate Constants Observed in Function ===
+        // {const_comments}
+
+        // === Control Flow Graph (CFG Basic Blocks) ===
+{cfg_comment or "        // (No CFG blocks extracted)"}
+
+        // === Radare2 Decompiled Pseudocode Reference ===
+{pdc_comment}
+
+        public static byte[] Execute(ReadOnlySpan<byte> input, uint initialState = 0)
+        {{
+            byte[] output = input.ToArray();
+            // TODO: Translate basic blocks from CFG above
+            return output;
+        }}
+    }}
+}}
+'''
+
+    out_root = _get_output_dir(target)
+    out_name = _safe_filename(output_filename or f"skeleton_{target.stem}_{func_title}.{ext}")
+    out_file = out_root / out_name
+    out_file.write_text(skeleton, encoding="utf-8")
+
+    # Abbreviate any long hex literals (>128 chars) in the LLM inline preview to save context
+    compact_skeleton = re.sub(
+        r'"([0-9A-F]{64})[0-9A-F]{65,}"',
+        r'"\1... [full table embedded in saved skeleton file]"',
+        skeleton,
+    )
+    compact_lines = compact_skeleton.splitlines()
+    preview_body = "\n".join(compact_lines[:60])
+    if len(compact_lines) > 60:
+        preview_body += f"\n... [omitted {len(compact_lines) - 60} lines — full skeleton saved to {out_file}]"
+
+    return (
+        f"=== Generated {lang.upper()} Algorithm Skeleton: {out_file} ===\n"
+        f"Target Function: {function_name_or_addr} in {target.name}\n"
+        f"CFG Blocks Extracted: {len(blocks_summary)}\n"
+        f"Embedded Tables: {len(extracted_tables)} (written in full to {out_file})\n\n"
+        f"{preview_body}"
+    )
 
 
 if __name__ == "__main__":
