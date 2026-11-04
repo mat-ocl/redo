@@ -20,8 +20,8 @@ If you cloned `mat-ocl/redo` into a temporary `scratch` folder (e.g. `brain\<id>
    - Creates `<Project>\samples` and `<Project>\output`.
    - Installs a self-contained copy of `run_re_mcp.ps1`, `run_re_mcp.sh`, `re_mcp_server.py`, `uninstall_plugin.ps1`, `plugin.json`, `mcp_config.json`, `rules/`, and `skills/` into `<Project>\.agents\plugins\redo\` (auto-discovered by **Antigravity**).
    - Copies `.agents/rules` and `.agents/skills` into `<Project>\.agents\`.
-   - Writes workspace-scoped MCP configs **and pre-approved `redo` tool permissions** inside `<Project>` pinned to `-ProjectDir "<Project>"`:
-     - `<Project>\.zed\settings.json` (**Zed Editor**: `context_servers.redo` + `agent.tool_permissions.tools` allowing all 50 `mcp:redo:<tool>` tools)
+   - Writes workspace-scoped MCP configs inside `<Project>` pinned to `-ProjectDir "<Project>"`:
+     - `<Project>\.zed\settings.json` (**Zed Editor**: project-scoped `context_servers.redo`, plus best-effort merge of `mcp:redo:*` `agent.tool_permissions` into Zed's global `settings.json` if present)
      - `<Project>\.cursor\mcp.json` (**Cursor**)
      - `<Project>\.mcp.json` + `<Project>\.claude\settings.local.json` (**Claude Code**: `mcpServers.redo` + `permissions.allow: ["mcp__redo", "mcp__redo__*"]`)
      - `<Project>\.vscode\mcp.json` (**VS Code**)
@@ -43,7 +43,6 @@ Write the workspace-scoped config inside the active project directory (e.g. `D:/
 {
   "context_servers": {
     "redo": {
-      "source": "custom",
       "command": "docker",
       "args": [
         "run", "-i", "--rm",

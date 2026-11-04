@@ -75,7 +75,7 @@ What `install_plugin.ps1 -TargetWorkspace "D:\Code\my-project"` sets up inside `
 - `D:\Code\my-project\samples\` & `D:\Code\my-project\output\`
 - `D:\Code\my-project\.agents\plugins\redo\` — Self-contained `run_re_mcp.ps1`, `run_re_mcp.sh`, `re_mcp_server.py`, `uninstall_plugin.ps1`, `plugin.json`, `mcp_config.json`, `rules/`, and `skills/` (auto-discovered by **Google Antigravity**).
 - `D:\Code\my-project\.agents\rules\` & `D:\Code\my-project\.agents\skills\` — Workspace agent rules and skills.
-- `D:\Code\my-project\.zed\settings.json` — Workspace-scoped MCP configuration **and `agent.tool_permissions.tools` (`allow`) for all 50 `mcp:redo:*` tools** in **Zed Editor**.
+- `D:\Code\my-project\.zed\settings.json` — Workspace-scoped MCP configuration (`context_servers.redo`) for **Zed Editor** (plus automatic best-effort merge of `mcp:redo:*` `agent.tool_permissions` into Zed's global `settings.json` if Zed is installed).
 - `D:\Code\my-project\.cursor\mcp.json` — Workspace-scoped MCP configuration for **Cursor**.
 - `D:\Code\my-project\.mcp.json` & `D:\Code\my-project\.claude\settings.local.json` — Workspace-scoped MCP configuration **and `permissions.allow` (`mcp__redo__*`)** for **Claude Code**.
 - `D:\Code\my-project\.vscode\mcp.json` — Workspace-scoped MCP configuration for **VS Code**.
@@ -99,7 +99,6 @@ Because `re_mcp_server.py` is baked directly into `/opt/re-mcp/re_mcp_server.py`
      {
        "context_servers": {
          "redo": {
-           "source": "custom",
            "command": "C:/Program Files/Docker/Docker/resources/bin/docker.exe",
            "args": [
              "run", "-i", "--rm",

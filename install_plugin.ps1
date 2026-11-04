@@ -146,40 +146,73 @@ if (Test-Path $SourceAgents) {
     Write-Host "[+] Installed workspace rules & skills: $DestAgents" -ForegroundColor Green
 }
 
-# 5. Write workspace-scoped editor MCP configs & tool permissions inside <Project>
+# 5. Write workspace-scoped editor MCP configs inside <Project>
 
-# Extract all @mcp.tool() names from re_mcp_server.py so Zed auto-allows all 50 redo tools
-$ZedToolPermissions = [ordered]@{}
-$ServerPyFile = Join-Path $ProjectPluginDir "re_mcp_server.py"
-if (Test-Path $ServerPyFile) {
-    $PyContent = Get-Content -Path $ServerPyFile -Raw -Encoding UTF8
-    $ToolMatches = [regex]::Matches($PyContent, '(?m)^@mcp\.tool\(\)\s*\r?\ndef\s+([a-zA-Z0-9_]+)\s*\(')
-    foreach ($m in $ToolMatches) {
-        $toolName = $m.Groups[1].Value
-        $ZedToolPermissions["mcp:redo:$toolName"] = @{ default = "allow" }
-    }
-}
-
-# 5a. Zed Editor: <Project>/.zed/settings.json (includes context_servers.redo + agent.tool_permissions)
+# 5a. Zed Editor: <Project>/.zed/settings.json (context_servers.redo without deprecated 'source' or user-only 'agent')
 $ZedDir = Join-Path $ResolvedTarget ".zed"
 New-Item -ItemType Directory -Path $ZedDir -Force | Out-Null
 $ZedSettingsPath = Join-Path $ZedDir "settings.json"
 @{
     context_servers = @{
         redo = @{
-            source  = "custom"
             command = "pwsh"
             args    = $CommonArgs
             env     = @{}
         }
     }
-    agent = @{
-        tool_permissions = @{
-            tools = $ZedToolPermissions
-        }
-    }
 } | ConvertTo-Json -Depth 6 | Set-Content -Path $ZedSettingsPath -Encoding UTF8
-Write-Host "[+] Wrote Zed workspace config & tool permissions ($($ZedToolPermissions.Count) tools allowed): $ZedSettingsPath" -ForegroundColor Green
+Write-Host "[+] Wrote Zed workspace config: $ZedSettingsPath" -ForegroundColor Green
+
+# Optional: If Zed is installed (global settings.json exists), merge project-agnostic mcp:redo:* tool permissions
+# into Zed's global settings.json (where Zed's schema requires 'agent.tool_permissions'). Never fail if unavailable.
+$ZedGlobalSettingsPath = if ($env:APPDATA) {
+    Join-Path $env:APPDATA "Zed\settings.json"
+} else {
+    Join-Path $HOME ".config/zed/settings.json"
+}
+if (Test-Path $ZedGlobalSettingsPath) {
+    try {
+        $ServerPyFile = Join-Path $ProjectPluginDir "re_mcp_server.py"
+        $ToolNames = @()
+        if (Test-Path $ServerPyFile) {
+            $PyContent = Get-Content -Path $ServerPyFile -Raw -Encoding UTF8
+            $ToolMatches = [regex]::Matches($PyContent, '(?m)^@mcp\.tool\(\)\s*\r?\ndef\s+([a-zA-Z0-9_]+)\s*\(')
+            foreach ($m in $ToolMatches) {
+                $ToolNames += $m.Groups[1].Value
+            }
+        }
+        $RawGlobalJson = Get-Content -Path $ZedGlobalSettingsPath -Raw -Encoding UTF8
+        # Strip full-line // comments and trailing commas so both PS 5.1 and pwsh 7+ parse Zed JSONC cleanly
+        $CleanGlobalJson = [regex]::Replace($RawGlobalJson, '(?m)^\s*//.*$', '')
+        $CleanGlobalJson = [regex]::Replace($CleanGlobalJson, ',(\s*[\}\]])', '$1')
+        if ([string]::IsNullOrWhiteSpace($CleanGlobalJson)) {
+            $CleanGlobalJson = "{}"
+        }
+        $GlobalObj = $CleanGlobalJson | ConvertFrom-Json
+        if (-not $GlobalObj) {
+            $GlobalObj = [pscustomobject]@{}
+        }
+        if (-not ($GlobalObj.PSObject.Properties.Name -contains "agent") -or -not $GlobalObj.agent) {
+            $GlobalObj | Add-Member -NotePropertyName "agent" -NotePropertyValue ([pscustomobject]@{}) -Force
+        }
+        if (-not ($GlobalObj.agent.PSObject.Properties.Name -contains "tool_permissions") -or -not $GlobalObj.agent.tool_permissions) {
+            $GlobalObj.agent | Add-Member -NotePropertyName "tool_permissions" -NotePropertyValue ([pscustomobject]@{}) -Force
+        }
+        if (-not ($GlobalObj.agent.tool_permissions.PSObject.Properties.Name -contains "tools") -or -not $GlobalObj.agent.tool_permissions.tools) {
+            $GlobalObj.agent.tool_permissions | Add-Member -NotePropertyName "tools" -NotePropertyValue ([pscustomobject]@{}) -Force
+        }
+        foreach ($tName in $ToolNames) {
+            $permKey = "mcp:redo:$tName"
+            $GlobalObj.agent.tool_permissions.tools | Add-Member -NotePropertyName $permKey -NotePropertyValue ([pscustomobject]@{ default = "allow" }) -Force
+        }
+        $GlobalObj | ConvertTo-Json -Depth 12 | Set-Content -Path $ZedGlobalSettingsPath -Encoding UTF8 -ErrorAction Stop
+        Write-Host "[+] Updated Zed global tool_permissions ($($ToolNames.Count) mcp:redo:* tools allowed): $ZedGlobalSettingsPath" -ForegroundColor Green
+    } catch {
+        Write-Host "[i] Note: Did not update Zed global tool_permissions in $ZedGlobalSettingsPath ($($_.Exception.Message)). Project .zed/settings.json is still configured." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "[i] Note: Zed global settings file not found ($ZedGlobalSettingsPath); skipped global agent.tool_permissions auto-allow." -ForegroundColor DarkGray
+}
 
 # 5b. Cursor: <Project>/.cursor/mcp.json
 $CursorDir = Join-Path $ResolvedTarget ".cursor"

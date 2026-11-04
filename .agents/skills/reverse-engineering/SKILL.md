@@ -19,9 +19,12 @@ Use the `redo` MCP server whenever analyzing compiled binaries, DSP firmware, or
    - Call `file_triage` and `diec_detect` to identify file format, compiler, linker, protector/packer (UPX, VMProtect, Themida), and section entropy.
    - Call `pe_elf_headers` for section VAs, RVAs, raw file offsets (`PointerToRawData` / `sh_offset`), Shannon entropy, exports, TLS callbacks, and PE resource directories. Pass `lookup_va="0x870b50, 0x8714e0"` to resolve one or more VAs/RVAs directly to their raw file offsets.
    - Call `yara_scan` (`ruleset="all_die"`, `"peid"`, `"packer"`, or `"crypto"`) to scan for packer or cryptographic signatures.
-2. **C++ & Native Binary Analysis + Algorithm Skeletons**:
+2. **C++ & Native Binary Analysis + Raw Firmware (`ppc`, `arm`, `mips`, `m68k`) + Algorithm Skeletons**:
    - Call `cpp_rtti_and_vtables` to reconstruct MSVC/Itanium class inheritance hierarchies and VTable virtual addresses.
-   - Call `r2_disassemble_function` or `ghidra_decompile_function` (use `fast_mode=True` on >5MB binaries for rapid single-function decompilation) on target exports or VTable method addresses.
+   - Call `r2_disassemble_function`, `r2_decompile_function`, or `ghidra_decompile_function` (use `fast_mode=True` on >5MB binaries for rapid single-function decompilation) on target exports or VTable method addresses.
+   - For headerless raw `.bin`/`.rom` firmware blobs (e.g. 32-bit Big-Endian PowerPC `ppc_be`, ARM, MIPS, m68k, Tricore):
+     - Pass `arch="ppc", bits=32, big_endian=True` (and optional `base_addr="0x..."`) to `r2_list_functions`, `r2_disassemble_function` (pass `num_instructions=64` for linear disassembly), `r2_decompile_function`, `r2_xrefs`, `r2_callgraph`, or `generate_algorithm_skeleton`.
+     - Pass `processor="PowerPC:BE:32:default"` (and optional `base_address="0x..."`) to `ghidra_decompile_function`, `ghidra_list_functions`, or `ghidra_decompile_all` for full Ghidra C decompilation of raw firmware.
    - Call `generate_algorithm_skeleton` (`target_language="python"` or `"csharp"`, optional `table_vas="0x870b50:256, 0x8714e0:72"`) to extract a function's Control Flow Graph (`agfj`), pseudocode (`pdc`), immediate constants, and referenced `.rdata`/`.data` lookup tables into a runnable `.py` or `.cs` implementation skeleton in `<project>/output/`.
 3. **Motorola DSP56300 Firmware & DSP Analysis**:
    - Call `dsp56300_disassemble` to decode 24-bit Motorola DSP56300 program words into readable assembly (`dsp56300-disasm`).
