@@ -19,7 +19,7 @@ If you cloned `mat-ocl/redo` into a temporary `scratch` folder (e.g. `brain\<id>
    - Pulls the pre-built `ghcr.io/mat-ocl/redo:latest` image (no 15-minute `docker build` required!).
    - Copies a self-contained `run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/re-sandbox/` (so temporary `scratch` clones do **not** break the installed plugin).
    - Copies `.agents/rules` and `.agents/skills` into `-TargetWorkspace`.
-   - When the plugin is enabled on a project, `hooks.json` (`sync_workspace.ps1` in Antigravity) or the editor's working directory (`$cwd` in Zed, Cursor, VS Code, Windsurf, Claude Code) automatically maps **only that project's folders** (`<Project>/samples`, `<Project>/output`, `<Project>`) into the Docker container—**no manual edits to `run_re_mcp.ps1` are needed**.
+   - `run_re_mcp.ps1` / `run_re_mcp.sh` runs as a **host-side MCP JSON-RPC multiplexer** that dynamically spawns and reuses an **isolated Docker container per project root on demand** (`<Project>/samples`, `<Project>/output`, `<Project>`), automatically resolving both explicit project paths and relative paths across open workspaces (`workspaces/<conversationId>.json` updated via `PreToolUse` in Antigravity, or `$cwd` in Zed/Cursor/VS Code/Windsurf/Claude Code).
 
 ### Fast Path B: Zero-Clone Mode (No `git clone` Required)
 

@@ -22,8 +22,8 @@ Follow this exact workflow whenever asked to install, set up, or configure `mat-
    - If you cloned `https://github.com/mat-ocl/redo.git` into a temporary `scratch` directory (e.g. `brain\<id>\scratch\redo`), **do NOT clone it a second time**.
    - `install_plugin.ps1` automatically detects `scratch`/`Temp` paths and installs a **self-contained copy** of `run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/re-sandbox/`.
 4. **NEVER Manually Edit `run_re_mcp.ps1` to Add Drive Mounts**:
-   - `run_re_mcp.ps1` mounts **only the active project's folders** (`<Project>/samples:/workspace/samples:ro`, `<Project>/output:/workspace/output:rw`, `<Project>:/workspace/project:rw`).
-   - In **Antigravity**, the bundled plugin lifecycle hook (`hooks.json` &rarr; `sync_workspace.ps1`) automatically captures the active project (`workspacePaths[0]`) and reloads the MCP mount when you switch projects.
+   - `run_re_mcp.ps1` acts as a **per-project MCP JSON-RPC multiplexer** that dynamically spawns an isolated Docker container for each project root (`<Project>/samples:/workspace/samples:ro`, `<Project>/output:/workspace/output:rw`, `<Project>:/workspace/project:rw`).
+   - In **Antigravity**, the bundled plugin lifecycle hook (`hooks.json` &rarr; `sync_workspace.ps1`) fires on `SessionStart`, `PreInvocation`, and `PreToolUse`, recording each conversation's active workspace in `workspaces/<conversationId>.json` so both relative and explicit paths automatically route to that project's isolated container.
    - In **Zed Editor, Cursor, VS Code, Windsurf, and Claude Code**, the editor spawns `run_re_mcp.ps1` with its working directory (`$cwd`) set to the active project root, which `run_re_mcp.ps1` mounts automatically.
 
 ---

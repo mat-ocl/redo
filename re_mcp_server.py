@@ -412,20 +412,26 @@ def _require_tool(binary_name: str) -> str:
 # =====================================================================
 
 @mcp.tool()
-def list_workspace_files(subdir: str = "") -> str:
+def list_workspace_files(subdir: str = "", project_dir: Optional[str] = None) -> str:
     """
     List files available in the active project or /workspace.
     `subdir` can be a relative subdirectory (e.g. 'samples', 'output', 'drivers') OR a path
-    inside the active project.
+    inside the active project. Optionally pass `project_dir` to target a specific project root.
     """
-    base = _translate_host_path(subdir)
+    target_arg = subdir
+    if project_dir:
+        target_arg = f"{project_dir.rstrip('/\\')}/{subdir.lstrip('/\\')}" if subdir else project_dir
+    base = _translate_host_path(target_arg)
     if not _is_within(base, WORKSPACE_DIR):
         raise ValueError("Directory must remain within /workspace.")
     if not base.exists():
         return f"Directory does not exist: {base}"
 
+    skip_dirs = {".git", "node_modules", ".venv", "__pycache__", "ghidra_cache"}
     entries = []
     for p in sorted(base.rglob("*")):
+        if any(part in skip_dirs for part in p.relative_to(base).parts):
+            continue
         if len(entries) >= 500:
             entries.append("... [truncated at 500 entries]")
             break
@@ -458,13 +464,17 @@ def search_workspace_files(
     regex_pattern: str,
     subdir: str = "output",
     file_glob: str = "*",
-    max_matches: int = 100
+    max_matches: int = 100,
+    project_dir: Optional[str] = None
 ) -> str:
     """
     Search across decompiled or extracted text files in `subdir` (defaults to 'output' in the
-    active project) using a regex.
+    active project) using a regex. Optionally pass `project_dir` to target a specific project root.
     """
-    base = _translate_host_path(subdir) if subdir else WORKSPACE_DIR
+    target_arg = subdir
+    if project_dir:
+        target_arg = f"{project_dir.rstrip('/\\')}/{subdir.lstrip('/\\')}" if subdir else project_dir
+    base = _translate_host_path(target_arg) if target_arg else WORKSPACE_DIR
     if not _is_within(base, WORKSPACE_DIR):
         raise ValueError("Subdirectory must remain within /workspace.")
     if not base.exists():

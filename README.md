@@ -408,16 +408,18 @@ Inside the interactive container shell, the following shortcuts are preloaded in
 
 ---
 
-## Automatic Per-Project Folder Mapping
+## Per-Project Container Isolation & Automatic Path Resolution
 
-When you open a project and enable **RE-Sandbox**, `run_re_mcp.ps1` / `run_re_mcp.sh` mounts **only that project's folders** into the Docker container:
+Unlike single-container MCP wrappers that freeze volume mounts at IDE startup, `run_re_mcp.ps1` and `run_re_mcp.sh` act as a **host-side MCP JSON-RPC multiplexer** that dynamically spawns and manages an **isolated Docker container per project root on demand**:
 1. `<ProjectDir>/samples` &rarr; `/workspace/samples:ro`
 2. `<ProjectDir>/output` &rarr; `/workspace/output:rw`
 3. `<ProjectDir>` &rarr; `/workspace/project:rw`
 
-How each editor passes the active project directory to `run_re_mcp.ps1`:
-- **Google Antigravity**: Uses the bundled plugin lifecycle hook (`plugin/re-sandbox/hooks.json` &rarr; `sync_workspace.ps1`), which receives `workspacePaths[0]` on `SessionStart` / `PreInvocation`, updates `active_workspace.txt`, and triggers a live MCP reload when you switch projects.
-- **Zed Editor, Cursor, VS Code, Windsurf, and Claude Code**: Spawn the MCP server process with its working directory (`$PWD` / `Get-Location`) set to the open project root, which `run_re_mcp.ps1` and `run_re_mcp.sh` detect automatically.
+How per-project routing and path resolution work across simultaneous projects:
+- **Explicit Host Paths**: When an agent passes any host path (`C:/CODE/ProjectA/samples/foo.dll` or `D:/Projects/ProjectB/rom.bin`), the multiplexer automatically detects the enclosing project root (via registered workspaces or project markers like `.git`, `.agents`, `.zed`, `.vscode`, `CMakeLists.txt`), spawns or reuses the container dedicated exclusively to that project, and routes the tool call to it.
+- **Relative Project Paths (`samples/foo.bin`, `"M3 Plug-In Editor.dll"`, or empty `list_workspace_files({})`)**:
+  - **Google Antigravity**: The bundled lifecycle hook (`plugin/re-sandbox/hooks.json` &rarr; `sync_workspace.ps1`) fires on `SessionStart`, `PreInvocation`, and synchronously on `PreToolUse` right before every tool call, recording each conversation's workspace in `workspaces/<conversationId>.json`. The multiplexer checks open workspaces for matching relative files first and falls back to the active conversation's workspace—rewriting relative paths to full project paths and routing them to that project's isolated container automatically.
+  - **Zed Editor, Cursor, VS Code, Windsurf, and Claude Code**: Spawn the MCP server process with its working directory (`$PWD` / `Get-Location`) set to the open project root, which `run_re_mcp.ps1` and `run_re_mcp.sh` detect automatically.
 
 ---
 
@@ -427,12 +429,12 @@ How each editor passes the active project directory to `run_re_mcp.ps1`:
 .
 ├── .github/
 │   └── workflows/
-│       └── docker-image.yml    # GitHub Actions CI/CD workflow (builds, smoke-tests & publishes to GHCR)
+│       └── docker-image.yml    # GitHub Actions CI/CD workflow (builds, smoke-tests & publishes to GHCR on v* tags)
 ├── Dockerfile                  # 4-stage Ubuntu 24.04 container build (includes dsp56300-disasm & binhexconv)
 ├── compose.yml                 # Hardened 'static' and 'dynamic' Docker Compose profiles
 ├── re_mcp_server.py            # FastMCP server exposing 50 reverse-engineering, hex & DSP tools
-├── run_re_mcp.ps1              # Portable Windows PowerShell MCP stdio launcher
-├── run_re_mcp.sh               # Portable Linux / macOS / WSL Bash MCP stdio launcher
+├── run_re_mcp.ps1              # Per-project Windows PowerShell MCP JSON-RPC container multiplexer
+├── run_re_mcp.sh               # Per-project Linux / macOS / WSL MCP JSON-RPC container multiplexer
 ├── install_plugin.ps1          # One-command installer / uninstaller for Antigravity, Zed & Docker
 ├── uninstall_plugin.ps1        # Standalone uninstaller (also copied into ~/.gemini/config/plugins/re-sandbox/)
 ├── install_zed.ps1             # Dedicated Zed Editor installer (updates %APPDATA%\Zed\settings.json & .zed/settings.json)

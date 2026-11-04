@@ -85,12 +85,22 @@ if (Test-Path $PluginSource) {
     New-Item -ItemType Directory -Path $PluginDest -Force | Out-Null
     Copy-Item -Path (Join-Path $PluginSource "*") -Destination $PluginDest -Recurse -Force
 
-    # Always copy run_re_mcp.ps1, re_mcp_server.py, and uninstall_plugin.ps1 into the plugin directory so it can run or uninstall self-contained
+    # Always copy run_re_mcp.ps1, run_re_mcp.sh, re_mcp_server.py, and uninstall_plugin.ps1 into the plugin directory so it can run or uninstall self-contained
     Copy-Item -Path (Join-Path $RepoRoot "run_re_mcp.ps1") -Destination (Join-Path $PluginDest "run_re_mcp.ps1") -Force
+    if (Test-Path (Join-Path $RepoRoot "run_re_mcp.sh")) {
+        Copy-Item -Path (Join-Path $RepoRoot "run_re_mcp.sh") -Destination (Join-Path $PluginDest "run_re_mcp.sh") -Force
+    }
     Copy-Item -Path (Join-Path $RepoRoot "re_mcp_server.py") -Destination (Join-Path $PluginDest "re_mcp_server.py") -Force
     if (Test-Path (Join-Path $RepoRoot "uninstall_plugin.ps1")) {
         Copy-Item -Path (Join-Path $RepoRoot "uninstall_plugin.ps1") -Destination (Join-Path $PluginDest "uninstall_plugin.ps1") -Force
     }
+
+    # Remove legacy single-workspace state files and ensure per-conversation workspaces directory exists
+    foreach ($legacyFile in @("active_workspace.txt", "known_workspaces.txt")) {
+        Remove-Item -Path (Join-Path $PluginDest $legacyFile) -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path (Join-Path $RepoRoot $legacyFile) -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path (Join-Path $PluginDest "workspaces") -Force | Out-Null
 
     if ($IsTempClone) {
         $LauncherPath = (Join-Path $PluginDest "run_re_mcp.ps1") -replace "\\", "/"
@@ -120,8 +130,12 @@ if (Test-Path $PluginSource) {
     Write-Host "[+] Installed Antigravity plugin and updated $McpConfigPath" -ForegroundColor Green
 }
 
-# 3. Optionally install .agents rules & skills into a target project workspace
+# 3. Optionally install .agents rules, skills, and project registration into a target project workspace
 if ($TargetWorkspace -and (Test-Path $TargetWorkspace)) {
+    $ResolvedTarget = (Resolve-Path $TargetWorkspace).Path -replace "\\", "/"
+    New-Item -ItemType Directory -Path (Join-Path $TargetWorkspace "samples") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $TargetWorkspace "output") -Force | Out-Null
+
     $SourceAgents = Join-Path $RepoRoot ".agents"
     $DestAgents = Join-Path $TargetWorkspace ".agents"
     if (Test-Path $SourceAgents) {
@@ -129,6 +143,19 @@ if ($TargetWorkspace -and (Test-Path $TargetWorkspace)) {
         Copy-Item -Path (Join-Path $SourceAgents "*") -Destination $DestAgents -Recurse -Force
         Write-Host "[+] Copied .agents rules and skills into workspace: $DestAgents" -ForegroundColor Green
     }
+
+    # Register target workspace in the per-project workspace registry
+    $WsRegistryDir = Join-Path $PluginDest "workspaces"
+    New-Item -ItemType Directory -Path $WsRegistryDir -Force | Out-Null
+    $SafeWsName = ($ResolvedTarget -replace '[^a-zA-Z0-9_-]', '_')
+    $WsEntryPath = Join-Path $WsRegistryDir "project_${SafeWsName}.json"
+    @{
+        conversationId = "project_${SafeWsName}"
+        workspacePath  = $ResolvedTarget
+        workspacePaths = @($ResolvedTarget)
+        updatedAtUtc   = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    } | ConvertTo-Json -Depth 4 | Set-Content -Path $WsEntryPath -Encoding UTF8
+    Write-Host "[+] Registered project workspace in multiplexer: $ResolvedTarget" -ForegroundColor Green
 }
 
 # 4. Install/Update Zed Editor Configuration (unless -SkipZed is passed)

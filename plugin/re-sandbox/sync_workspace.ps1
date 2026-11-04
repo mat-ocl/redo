@@ -1,40 +1,49 @@
 $ErrorActionPreference = "SilentlyContinue"
 
+$isPreToolUse = $false
+
 try {
     $rawInput = [Console]::In.ReadToEnd()
     if ($rawInput) {
         $payload = $rawInput | ConvertFrom-Json
+        if ($null -ne $payload.toolCall) {
+            $isPreToolUse = $true
+        }
+
         if ($payload.workspacePaths -and $payload.workspacePaths.Count -gt 0) {
-            $wsPath = $payload.workspacePaths[0]
-            if ($wsPath -match '^file:///') {
-                $wsPath = [System.Uri]::UnescapeDataString(($wsPath -replace '^file:///', ''))
+            $wsList = @()
+            foreach ($rawWs in $payload.workspacePaths) {
+                $wsPath = [string]$rawWs
+                if ($wsPath -match '^file:///') {
+                    $wsPath = [System.Uri]::UnescapeDataString(($wsPath -replace '^file:///', ''))
+                }
+                $wsPath = ($wsPath -replace '\\', '/').TrimEnd('/')
+                if ($wsPath -and (Test-Path $wsPath)) {
+                    $wsList += $wsPath
+                }
             }
-            $wsPath = ($wsPath -replace '\\', '/').TrimEnd('/')
-            if ($wsPath) {
+
+            if ($wsList.Count -gt 0) {
                 $stateDir = $PSScriptRoot
-                $activeFile = Join-Path $stateDir "active_workspace.txt"
-                $prevWs = ""
-                if (Test-Path $activeFile) {
-                    $prevWs = (Get-Content -Path $activeFile -Raw).Trim()
+                $wsDir = Join-Path $stateDir "workspaces"
+                if (-not (Test-Path $wsDir)) {
+                    New-Item -ItemType Directory -Path $wsDir -Force | Out-Null
                 }
 
-                if ($prevWs -ne $wsPath) {
-                    Set-Content -Path $activeFile -Value $wsPath -NoNewline -Encoding UTF8
-
-                    # Trigger a live MCP reload in Antigravity so run_re_mcp.ps1 mounts the newly active project
-                    if ($env:ANTIGRAVITY_LS_ADDRESS -and $env:ANTIGRAVITY_CSRF_TOKEN) {
-                        $pluginDirName = Split-Path -Leaf $stateDir
-                        $uri = "http://$($env:ANTIGRAVITY_LS_ADDRESS)/exa.language_server_pb.LanguageServerService/JetboxWriteState"
-                        $headers = @{
-                            "Content-Type"         = "application/json"
-                            "x-codeium-csrf-token" = $env:ANTIGRAVITY_CSRF_TOKEN
-                        }
-                        $disableBody = "{`"userConfig`":{`"plugins`":{`"$pluginDirName`":{`"enabled`":false}}}}"
-                        $enableBody  = "{`"userConfig`":{`"plugins`":{`"$pluginDirName`":{`"enabled`":true}}}}"
-                        Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $disableBody -TimeoutSec 2 | Out-Null
-                        Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $enableBody -TimeoutSec 2 | Out-Null
-                    }
+                $convId = if ($payload.conversationId) {
+                    ($payload.conversationId -replace '[^a-zA-Z0-9_-]', '_')
+                } else {
+                    "default"
                 }
+
+                $entry = @{
+                    conversationId = $convId
+                    workspacePath  = $wsList[0]
+                    workspacePaths = $wsList
+                    updatedAtUtc   = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+                }
+                $entryJson = $entry | ConvertTo-Json -Compress
+                Set-Content -Path (Join-Path $wsDir "$convId.json") -Value $entryJson -NoNewline -Encoding UTF8
             }
         }
     }
@@ -42,4 +51,8 @@ try {
     # Never block agent execution if hook parsing fails
 }
 
-[Console]::Out.Write("{}")
+if ($isPreToolUse) {
+    [Console]::Out.Write('{"decision":"allow"}')
+} else {
+    [Console]::Out.Write('{}')
+}
