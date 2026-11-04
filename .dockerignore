@@ -1,5 +1,5 @@
 # =====================================================================
-# RE Sandbox - Docker Build Context Ignore Rules
+# redo - Docker Build Context Ignore Rules
 # Keeps `docker compose build` fast and prevents local samples/outputs
 # from leaking into image layers.
 # =====================================================================
@@ -40,5 +40,4 @@ AGENTS.md
 run_re_mcp.ps1
 run_re_mcp.sh
 install_plugin.ps1
-install_zed.ps1
-install_zed.sh
+uninstall_plugin.ps1

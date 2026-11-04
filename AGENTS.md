@@ -7,41 +7,38 @@ This repository provides a hardened, containerized **Reverse Engineering & Binar
 
 ---
 
-## 0. Fast Autonomous AI Agent Installation
+## 0. Fast Autonomous AI Agent Installation (Strictly Per-Project)
 
-### Fast Path A: If You Already Cloned This Repo (Even Into a Temporary `scratch` Directory)
-If you cloned `mat-ocl/redo` into a temporary `scratch` folder (e.g. `brain\<id>\scratch\redo`) or a local directory, **do NOT clone it a second time and do NOT pass `-BuildImage`**:
+### Fast Path A: One-Command Per-Project Installer (Recommended)
+If you cloned `mat-ocl/redo` into a temporary `scratch` folder (e.g. `brain\<id>\scratch\redo` or `/tmp/scratch/redo`) or a local directory, **do NOT clone it a second time, do NOT pass `-BuildImage`, and NEVER touch global editor config files**:
 1. Simply run:
    ```powershell
    pwsh -NoProfile -ExecutionPolicy Bypass -File .\install_plugin.ps1 -TargetWorkspace "<ActiveUserWorkspacePath>"
    ```
-2. What `install_plugin.ps1` does automatically in ~20 seconds:
+2. What `install_plugin.ps1` does automatically inside `<ActiveUserWorkspacePath>` in ~20 seconds:
    - Pulls the pre-built `ghcr.io/mat-ocl/redo:latest` image (no 15-minute `docker build` required!).
-   - Copies a self-contained `run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/redo/` (so temporary `scratch` clones do **not** break the installed plugin).
-   - Copies `.agents/rules` and `.agents/skills` into `-TargetWorkspace`.
-   - `run_re_mcp.ps1` / `run_re_mcp.sh` runs as a **host-side MCP JSON-RPC multiplexer** that dynamically spawns and reuses an **isolated Docker container per project root on demand** (`<Project>/samples`, `<Project>/output`, `<Project>`), automatically resolving both explicit project paths and relative paths across open workspaces (`workspaces/<conversationId>.json` updated via `PreToolUse` in Antigravity, or `$cwd` in Zed/Cursor/VS Code/Windsurf/Claude Code).
+   - Creates `<Project>\samples` and `<Project>\output`.
+   - Installs a self-contained copy of `run_re_mcp.ps1`, `run_re_mcp.sh`, `re_mcp_server.py`, `uninstall_plugin.ps1`, `plugin.json`, `mcp_config.json`, `rules/`, and `skills/` into `<Project>\.agents\plugins\redo\` (auto-discovered by **Antigravity**).
+   - Copies `.agents/rules` and `.agents/skills` into `<Project>\.agents\`.
+   - Writes workspace-scoped MCP configs inside `<Project>` pinned to `-ProjectDir "<Project>"`:
+     - `<Project>\.zed\settings.json` (**Zed Editor**)
+     - `<Project>\.cursor\mcp.json` (**Cursor**)
+     - `<Project>\.mcp.json` (**Claude Code**)
+     - `<Project>\.vscode\mcp.json` (**VS Code**)
 
-### Fast Path B: Zero-Clone Mode (No `git clone` Required)
+### Fast Path B: Zero-Clone Per-Project Setup (No `git clone` Required)
 
-If a user gives you a link to this GitHub repository and asks you to install or set up `redo` **without cloning the repository to disk**, follow these exact steps. Because `re_mcp_server.py` is baked directly into `/opt/re-mcp/re_mcp_server.py` (with an unbuffered wrapper at `/usr/local/bin/re-mcp-server`) inside the Docker image, **no local repository clone or helper scripts on disk are required**.
+If a user gives you a link to this GitHub repository and asks you to set up `redo` inside their project **without cloning the repository to disk**, follow these steps. Because `re_mcp_server.py` is baked directly into `/opt/re-mcp/re_mcp_server.py` (with an unbuffered wrapper at `/usr/local/bin/re-mcp-server`) inside the Docker image, **no local repository clone is required**.
 
-### Step 1: Pull the Pre-Built GHCR Image (Fastest) or Build Directly from GitHub
-Pull the pre-built image from GitHub Container Registry (or build directly from the remote GitHub repository URL if preferred):
-
+### Step 1: Pull the Pre-Built GHCR Image
 ```bash
-# Fastest: Pull pre-built image from GHCR
 docker pull ghcr.io/mat-ocl/redo:latest
-
-# Alternative: Build from remote GitHub URL without cloning
-docker build --target final -t ghcr.io/mat-ocl/redo:latest https://github.com/mat-ocl/redo.git
 ```
 
-### Step 2: Register the MCP Server in Zero-Clone Mode
-Choose the user's active IDE / MCP client and write the corresponding configuration using `docker run` directly. Mount the active project directory (e.g. `D:/Code/my-project` on Windows or `$HOME/my-project` on Linux/macOS) to `/workspace/project:rw` (plus its `samples` and `output` folders) and set `RE_PROJECT_ROOT` to match:
+### Step 2: Register the MCP Server Inside the Target Project Folder
+Write the workspace-scoped config inside the active project directory (e.g. `D:/Code/my-project`), mounting `<Project>/samples`, `<Project>/output`, and `<Project>`:
 
-#### Option A: Zed Editor (`.zed/settings.json` in the project or `%APPDATA%\Zed\settings.json`)
-Merge the following `"redo"` entry into the `"context_servers"` object in Zed's `settings.json`:
-
+#### Option A: Zed Editor (`<Project>/.zed/settings.json`)
 ```json
 {
   "context_servers": {
@@ -72,11 +69,8 @@ Merge the following `"redo"` entry into the `"context_servers"` object in Zed's 
   }
 }
 ```
-*(Note: On Windows, if Zed's environment `PATH` does not include Docker, set `"command"` to `"C:/Program Files/Docker/Docker/resources/bin/docker.exe"`).*
 
-#### Option B: Google Antigravity (`~/.gemini/config/plugins/redo/mcp_config.json`) / Claude Desktop / Cursor / Windsurf
-Write the following JSON to the MCP configuration file:
-
+#### Option B: Google Antigravity (`<Project>/.agents/plugins/redo/mcp_config.json`) / Cursor (`<Project>/.cursor/mcp.json`) / Claude Code (`<Project>/.mcp.json`)
 ```json
 {
   "mcpServers": {

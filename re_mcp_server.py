@@ -427,7 +427,10 @@ def list_workspace_files(subdir: str = "", project_dir: Optional[str] = None) ->
     if not base.exists():
         return f"Directory does not exist: {base}"
 
-    skip_dirs = {".git", "node_modules", ".venv", "__pycache__", "ghidra_cache"}
+    skip_dirs = {
+        ".git", ".agents", ".zed", ".cursor", ".vscode",
+        "redo-plugin", "node_modules", ".venv", "__pycache__", "ghidra_cache"
+    }
     entries = []
     for p in sorted(base.rglob("*")):
         if any(part in skip_dirs for part in p.relative_to(base).parts):
