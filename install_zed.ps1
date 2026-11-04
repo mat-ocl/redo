@@ -132,6 +132,7 @@ $ServerBlockJson
 }
 "@
 
+try {
 if (-not (Test-Path $ZedSettingsPath)) {
     Set-Content -Path $ZedSettingsPath -Value $GlobalJsonContent -Encoding UTF8
     Write-Host "[+] Created global Zed settings at: $ZedSettingsPath" -ForegroundColor Green
@@ -219,6 +220,9 @@ $ServerBlockJson
             Write-Host "[+] Added 'context_servers.redo' block to global Zed settings: $ZedSettingsPath" -ForegroundColor Green
         }
     }
+}
+} catch {
+    Write-Host "[!] Could not update global Zed settings at '$ZedSettingsPath' (file may be locked by a running Zed process). Using workspace-scoped .zed/settings.json instead." -ForegroundColor Yellow
 }
 
 # 5. Optionally append redo rules to global %APPDATA%\Zed\AGENTS.md

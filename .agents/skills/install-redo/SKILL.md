@@ -2,99 +2,131 @@
 name: install-redo
 description: >-
   Install, update, repair, configure, or uninstall the redo (mat-ocl/redo) Docker image,
-  MCP server, and workspace rules/skills for Antigravity, Zed Editor, Claude Desktop,
-  or Cursor. Trigger whenever the user asks to install, set up, update, connect, or uninstall
+  MCP server, and workspace rules/skills for Zed Editor, Cursor, Claude Desktop, or Antigravity.
+  Trigger whenever the user asks to install, set up, update, connect, or uninstall
   mat-ocl/redo or redo in a workspace.
 ---
 
 # Installing & Configuring redo (`mat-ocl/redo`)
 
-Follow this exact workflow whenever asked to install, set up, or configure `mat-ocl/redo` (`redo`).
+Follow this exact workflow whenever asked to install, set up, or configure `mat-ocl/redo` or `redo`.
 
 ## Critical Rules (Avoid Common Pitfalls)
 
 1. **Trusted Air-Gapped Sandbox**: `mat-ocl/redo` is the official **`redo`** containerized MCP server (`ghcr.io/mat-ocl/redo:latest`). It runs with `--network none`, `cap_drop: ALL`, `no-new-privileges:true`, and drops privileges to `ubuntu` (`UID 1000`).
 2. **NEVER Run a Slow Local `docker build` Unless Explicitly Asked**:
    - The pre-built image is published on GitHub Container Registry at `ghcr.io/mat-ocl/redo:latest`.
-   - `install_plugin.ps1` automatically pulls `ghcr.io/mat-ocl/redo:latest` in ~20 seconds.
+   - Always pull the pre-built image in ~20 seconds instead of building from source.
    - **Do NOT** pass `-BuildImage` unless the user explicitly modified `Dockerfile` and asked to rebuild from source.
 3. **NEVER Clone the Repository Twice**:
-   - If you cloned `https://github.com/mat-ocl/redo.git` into a temporary `scratch` directory (e.g. `brain\<id>\scratch\redo`), **do NOT clone it a second time**.
-   - `install_plugin.ps1` automatically detects `scratch`/`Temp` paths and installs a **self-contained copy** of `run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/redo/`.
-4. **NEVER Manually Edit `run_re_mcp.ps1` to Add Drive Mounts**:
-   - `run_re_mcp.ps1` acts as a **per-project MCP JSON-RPC multiplexer** that dynamically spawns an isolated Docker container for each project root (`<Project>/samples:/workspace/samples:ro`, `<Project>/output:/workspace/output:rw`, `<Project>:/workspace/project:rw`).
-   - In **Antigravity**, the bundled plugin lifecycle hook (`hooks.json` &rarr; `sync_workspace.ps1`) fires on `SessionStart`, `PreInvocation`, and `PreToolUse`, recording each conversation's active workspace in `workspaces/<conversationId>.json` so both relative and explicit paths automatically route to that project's isolated container.
-   - In **Zed Editor, Cursor, VS Code, Windsurf, and Claude Code**, the editor spawns `run_re_mcp.ps1` with its working directory (`$cwd`) set to the active project root, which `run_re_mcp.ps1` mounts automatically.
+   - If you cloned `https://github.com/mat-ocl/redo.git` into a temporary directory (e.g. `/tmp/scratch/redo` or `brain\<id>\scratch\redo`), **do NOT clone it again**.
+   - Reuse the existing clone to copy files.
+4. **NEVER Manually Edit Global Zed Settings**:
+   - Zed locks its global `%APPDATA%\Zed\settings.json`, causing installer scripts to fail when Zed is open.
+   - Instead, configure `redo` per-project using `<Project>\.zed\settings.json` (workspace-scoped, no locking issues).
 
 ---
 
 ## Step-by-Step Installation Procedure
 
-### Option A: One-Command Installer (When Cloned Locally or in `scratch\redo`)
-Run `install_plugin.ps1` from PowerShell, passing `-TargetWorkspace` set to the user's active project directory so `.agents/rules` and `.agents/skills` are also copied into their workspace:
+### Option A: One-Command Installer with Per-Project Workspace Setup
+
+Clone the repo once, then run the installer with `-TargetWorkspace` and `-SkipZed`:
 
 ```powershell
-pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<PathToRedo>\install_plugin.ps1" -TargetWorkspace "<ActiveWorkspacePath>"
+# 1. Clone (only if you haven't already)
+cd /tmp && git clone --depth 1 https://github.com/mat-ocl/redo.git scratch/redo
+
+# 2. Install with per-project workspace setup, skip Zed global settings edit
+pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<PathToRedo>\install_plugin.ps1" `
+    -TargetWorkspace "<ActiveWorkspacePath>" `
+    -SkipZed
 ```
 
-What this single command does:
-1. Checks if `ghcr.io/mat-ocl/redo:latest` exists locally; if not, pulls `ghcr.io/mat-ocl/redo:latest`.
+What this does:
+1. Checks if `ghcr.io/mat-ocl/redo:latest` exists locally; pulls it in ~20 seconds if not.
 2. Installs the self-contained Antigravity plugin (`run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, `sync_workspace.ps1`, `mcp_config.json`, `plugin.json`, rules, and skills) into `~/.gemini/config/plugins/redo/`.
-3. Copies `.agents/rules` and `.agents/skills` into `<ActiveWorkspacePath>\.agents\`.
-4. Non-destructively merges the `redo` context server into Zed Editor's `settings.json` if Zed is installed.
+3. Copies `.agents/rules` and `.agents/skills` into `<Project>\.agents\` and writes workspace-scoped `<Project>\.zed\settings.json`.
+4. Registers the project workspace in the per-project multiplexer's `workspaces/` registry.
 
 ---
 
-### Option B: Zero-Clone Installation (No `git clone` at All)
-If you want to install without cloning the repository:
+### Option B: Manual Per-Project Installation (No Installer Script Needed)
 
-1. **Pull the pre-built image**:
+If you want a fully self-contained, zero-dependency setup inside a project that works even if the repository clone or installer script is deleted:
+
+1. **Pull the Docker image**:
    ```powershell
    docker pull ghcr.io/mat-ocl/redo:latest
    ```
-2. **Write `~/.gemini/config/plugins/redo/mcp_config.json`** (mounting the active project folder directly):
+
+2. **Create project plugin directory** (`<Project>\redo-plugin\`):
+   ```powershell
+   New-Item -ItemType Directory -Path "<Project>\redo-plugin" -Force | Out-Null
+   ```
+
+3. **Copy required files** from the `redo` clone into the project-local plugin folder:
+   ```powershell
+   Copy-Item "<PathToRedo>\plugin\redo\*"   "<Project>\redo-plugin\" -Recurse -Force
+   Copy-Item "<PathToRedo>\run_re_mcp.ps1"  "<Project>\redo-plugin\run_re_mcp.ps1"  -Force
+   Copy-Item "<PathToRedo>\re_mcp_server.py" "<Project>\redo-plugin\re_mcp_server.py" -Force
+   ```
+
+4. **Create project-local Zed config** (`<Project>\.zed\settings.json`):
    ```json
    {
-     "mcpServers": {
+     "context_servers": {
        "redo": {
-         "command": "docker",
+         "source": "custom",
+         "command": "pwsh",
          "args": [
-           "run", "-i", "--rm",
-           "--network", "none",
-           "--cap-drop", "ALL",
-           "--cap-add", "CHOWN",
-           "--cap-add", "DAC_OVERRIDE",
-           "--cap-add", "SETUID",
-           "--cap-add", "SETGID",
-           "--cap-add", "SYS_PTRACE",
-           "--security-opt", "seccomp=unconfined",
-           "--security-opt", "no-new-privileges:true",
-           "-e", "PYTHONUNBUFFERED=1",
-           "-e", "RE_PROJECT_ROOT=D:/Code/my-project",
-           "-v", "D:/Code/my-project/samples:/workspace/samples:ro",
-           "-v", "D:/Code/my-project/output:/workspace/output:rw",
-           "-v", "D:/Code/my-project:/workspace/project:rw",
-           "ghcr.io/mat-ocl/redo:latest",
-           "re-mcp-server"
-         ]
+           "-NoProfile",
+           "-NonInteractive",
+           "-ExecutionPolicy",
+           "Bypass",
+           "-File",
+           "<project-absolute-path>/redo-plugin/run_re_mcp.ps1"
+         ],
+         "env": {}
        }
      }
    }
    ```
 
+5. **Copy `.agents/rules` and `.agents/skills`** into the project:
+   - Copy `<PathToRedo>/.agents/*` &rarr; `<Project>/.agents/` (creates `rules` and `skills` directories).
+
 ---
 
-## Uninstalling redo
+## Uninstalling `redo`
 
-To cleanly uninstall the Antigravity plugin (`~/.gemini/config/plugins/redo`), remove the Zed `context_servers.redo` entry, and stop any running containers:
+Clean uninstall per-project or globally:
 
 ```powershell
-# From the repository:
-.\install_plugin.ps1 -Uninstall
+# Option 1: Run the uninstaller script (from the repo or installed plugin folder):
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$HOME\.gemini\config\plugins\redo\uninstall_plugin.ps1" -TargetWorkspace "D:\Code\my-project"
 
-# Or from anywhere (even if the repository clone was deleted):
-pwsh -NoProfile -ExecutionPolicy Bypass -File "$HOME\.gemini\config\plugins\redo\uninstall_plugin.ps1"
+# Option 2: Manual per-project cleanup:
+Remove-Item "D:\Code\my-project\.zed\settings.json" -ErrorAction SilentlyContinue
+Remove-Item "D:\Code\my-project\redo-plugin" -Recurse -Force -ErrorAction SilentlyContinue
 
-# Also delete the local Docker image (ghcr.io/mat-ocl/redo:latest):
-.\install_plugin.ps1 -Uninstall -RemoveImage
+# Remove .agents/rules and .agents/skills that were added by redo:
+Remove-Item "D:\Code\my-project\.agents\rules\AGENTS.md" -ErrorAction SilentlyContinue
+Remove-Item "D:\Code\my-project\.agents\skills\install-redo" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "D:\Code\my-project\.agents\skills\reverse-engineering" -Recurse -Force -ErrorAction SilentlyContinue
+
+# Stop and remove the Docker image (optional):
+docker stop $(docker ps --filter "ancestor=ghcr.io/mat-ocl/redo:latest" -q) 2>$null
+docker rmi ghcr.io/mat-ocl/redo:latest
 ```
+
+---
+
+## How It Works
+
+The **per-project** approach uses `run_re_mcp.ps1` as a JSON-RPC multiplexer that:
+- Spawns and reuses an isolated Docker container (`ghcr.io/mat-ocl/redo:latest`) per project root on demand.
+- Mounts `<Project>/samples:/workspace/samples:ro`, `<Project>/output:/workspace/output:rw`, and `<Project>:/workspace/project:rw`.
+- Runs with full air-gapped security (`--network none`, `cap_drop ALL`).
+
+Since Zed reads `.zed/settings.json` per workspace (not just globally), each project gets its own isolated MCP server config without global file-locking conflicts.

@@ -156,6 +156,31 @@ if ($TargetWorkspace -and (Test-Path $TargetWorkspace)) {
         updatedAtUtc   = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     } | ConvertTo-Json -Depth 4 | Set-Content -Path $WsEntryPath -Encoding UTF8
     Write-Host "[+] Registered project workspace in multiplexer: $ResolvedTarget" -ForegroundColor Green
+
+    # Write workspace-scoped .zed/settings.json inside the target project (no global Zed file-locking issues)
+    $TargetZedDir = Join-Path $TargetWorkspace ".zed"
+    New-Item -ItemType Directory -Path $TargetZedDir -Force | Out-Null
+    $TargetZedSettings = Join-Path $TargetZedDir "settings.json"
+    @{
+        context_servers = @{
+            redo = @{
+                source  = "custom"
+                command = "pwsh"
+                args    = @(
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    $LauncherPath,
+                    "-ProjectDir",
+                    $ResolvedTarget
+                )
+                env     = @{}
+            }
+        }
+    } | ConvertTo-Json -Depth 6 | Set-Content -Path $TargetZedSettings -Encoding UTF8
+    Write-Host "[+] Wrote workspace-scoped Zed config: $TargetZedSettings" -ForegroundColor Green
 }
 
 # 4. Install/Update Zed Editor Configuration (unless -SkipZed is passed)

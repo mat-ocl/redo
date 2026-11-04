@@ -49,16 +49,18 @@ if (Test-Path $PluginDest) {
     Write-Host "[*] Antigravity plugin directory not found at $PluginDest (already removed)." -ForegroundColor DarkGray
 }
 
-# 3. Remove workspace-level .agents files if -TargetWorkspace was provided
+# 3. Remove workspace-level .agents, .zed, and redo-plugin files if -TargetWorkspace was provided
 if ($TargetWorkspace -and (Test-Path $TargetWorkspace)) {
     foreach ($rel in @(
+        "redo-plugin",
+        ".zed\settings.json",
         ".agents\skills\reverse-engineering",
         ".agents\skills\install-redo",
         ".agents\rules\AGENTS.md"
     )) {
         $targetPath = Join-Path $TargetWorkspace $rel
         if (Test-Path $targetPath) {
-            Remove-Item -Path $targetPath -Recurse -Force
+            Remove-Item -Path $targetPath -Recurse -Force -ErrorAction SilentlyContinue
             Write-Host "[+] Removed workspace file/folder: $targetPath" -ForegroundColor Green
         }
     }
@@ -68,18 +70,22 @@ if ($TargetWorkspace -and (Test-Path $TargetWorkspace)) {
 if (-not $SkipZed -and $env:APPDATA) {
     $ZedSettingsPath = Join-Path $env:APPDATA "Zed\settings.json"
     if (Test-Path $ZedSettingsPath) {
-        $RawText = Get-Content -Path $ZedSettingsPath -Raw -Encoding UTF8
-        if ($RawText -match '"redo(?:-tools)?"\s*:\s*\{') {
-            # Remove the "redo" block inside context_servers
-            $Cleaned = [regex]::Replace(
-                $RawText,
-                '(?ms)\s*"redo(?:-tools)?"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?',
-                ""
-            )
-            # Clean up any trailing comma before closing brace of context_servers
-            $Cleaned = [regex]::Replace($Cleaned, ',(\s*\})', '$1')
-            Set-Content -Path $ZedSettingsPath -Value $Cleaned -NoNewline -Encoding UTF8
-            Write-Host "[+] Removed 'redo' from global Zed settings: $ZedSettingsPath" -ForegroundColor Green
+        try {
+            $RawText = Get-Content -Path $ZedSettingsPath -Raw -Encoding UTF8
+            if ($RawText -match '"redo(?:-tools)?"\s*:\s*\{') {
+                # Remove the "redo" block inside context_servers
+                $Cleaned = [regex]::Replace(
+                    $RawText,
+                    '(?ms)\s*"redo(?:-tools)?"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?',
+                    ""
+                )
+                # Clean up any trailing comma before closing brace of context_servers
+                $Cleaned = [regex]::Replace($Cleaned, ',(\s*\})', '$1')
+                Set-Content -Path $ZedSettingsPath -Value $Cleaned -NoNewline -Encoding UTF8
+                Write-Host "[+] Removed 'redo' from global Zed settings: $ZedSettingsPath" -ForegroundColor Green
+            }
+        } catch {
+            Write-Host "[!] Could not update global Zed settings at '$ZedSettingsPath' (file may be locked by Zed)." -ForegroundColor Yellow
         }
     }
 }
