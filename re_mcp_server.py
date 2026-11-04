@@ -380,6 +380,54 @@ def _safe_filename(name: str) -> str:
     return clean
 
 
+def _spill_or_preview_text(
+    text: str,
+    target: Optional[Path],
+    default_filename: str,
+    max_inline_chars: int = 3500,
+    max_inline_lines: int = 65,
+    force_save: bool = False,
+) -> str:
+    """
+    Protect the LLM context window by automatically spilling outputs larger than
+    `max_inline_chars` or `max_inline_lines` (or when `force_save=True`) to
+    `<project>/output/<default_filename>` and returning only a compact preview + file path.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return text
+
+    lines = stripped.splitlines()
+    total_lines = len(lines)
+    total_chars = len(stripped)
+
+    if not force_save and total_chars <= max_inline_chars and total_lines <= max_inline_lines:
+        return stripped
+
+    out_root = _get_output_dir(target) if target is not None else OUTPUT_DIR
+    out_root.mkdir(parents=True, exist_ok=True)
+    cleaned_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", default_filename)
+    out_file = out_root / _safe_filename(cleaned_name)
+    out_file.write_text(stripped + "\n", encoding="utf-8")
+
+    preview_lines = lines[:max_inline_lines]
+    preview = "\n".join(preview_lines)
+    if len(preview) > max_inline_chars:
+        preview = preview[:max_inline_chars]
+
+    omitted_lines = max(0, total_lines - len(preview.splitlines()))
+    omitted_chars = max(0, total_chars - len(preview))
+    if omitted_lines == 0 and omitted_chars == 0:
+        return f"[Saved to: {out_file} ({total_chars} chars, {total_lines} lines)]\n\n{preview}"
+
+    return (
+        f"[Full output ({total_chars} chars, {total_lines} lines) auto-saved to: {out_file}]\n"
+        f"[Use read_workspace_file('{out_file}', start_line=1, max_lines=150) or search_workspace_files to inspect further.]\n\n"
+        f"{preview}\n"
+        f"... [omitted {omitted_lines} lines / {omitted_chars} chars — full output in {out_file}]"
+    )
+
+
 def _get_staging_dir(project_dir: Optional[str] = None) -> Path:
     """
     Return a writable staging directory for the target project (or default workspace).
@@ -656,7 +704,7 @@ def _resolve_va_or_rva_to_offset(data: bytes, va_or_rva_str: str) -> tuple[int, 
 def binary_hex_dump(
     file_path: str,
     byte_offset: int = 0,
-    byte_length: int = 512,
+    byte_length: int = 256,
     format_style: str = "canonical",
     bytes_per_line: int = 16,
     search_hex_pattern: Optional[str] = None,
@@ -787,21 +835,41 @@ def binary_hex_dump(
 
     body = "\n".join(lines)
     saved_note = ""
-    if save_output:
+    auto_spill = save_output or len(chunk) > 256 or len(body) > 2000 or bool(output_filename)
+    if auto_spill:
         out_root = _get_output_dir(target)
         out_name = _safe_filename(
             output_filename or f"{target.stem}_0x{byte_offset:X}_{len(chunk)}B_{fmt}.txt"
         )
         out_file = out_root / out_name
         out_file.write_text(body, encoding="utf-8")
-        saved_note = f"Saved output to: {out_file}\n"
+        if len(chunk) > 256:
+            bin_slice_file = out_root / _safe_filename(f"{target.stem}_0x{byte_offset:X}_{len(chunk)}B.bin")
+            bin_slice_file.write_bytes(chunk)
+            saved_note = (
+                f"Auto-saved full hex dump ({len(chunk)} B) to: {out_file}\n"
+                f"Auto-saved raw binary slice ({len(chunk)} B) to: {bin_slice_file}\n"
+            )
+        else:
+            saved_note = f"Saved output to: {out_file}\n"
 
     header = (
         f"=== Binary Hex Dump: {target.name} (file size: {file_size} B, "
         f"showing offset 0x{byte_offset:X}..0x{byte_offset + len(chunk):X} [{len(chunk)} B], "
         f"style={fmt}) ===\n"
     )
-    preview = body if len(body) <= 24000 else body[:24000] + "\n... [truncated inline preview]"
+    if len(lines) > 20:
+        preview = (
+            "\n".join(lines[:20])
+            + f"\n... [omitted {len(lines) - 20} lines ({len(chunk)} B total) to save LLM context — full dump in {out_file}]"
+        )
+    elif len(body) > 2000:
+        preview = (
+            body[:2000]
+            + f"\n... [omitted {len(body) - 2000} chars ({len(chunk)} B total) to save LLM context — full dump in {out_file}]"
+        )
+    else:
+        preview = body
     return header + va_summary + search_summary + saved_note + preview
 
 
@@ -1514,24 +1582,19 @@ def dsp56300_disassemble(
         )
         full_output = f"{header_meta}\n{disasm_text}"
 
-        if save_output or len(full_output) > 20000:
-            out_name = (
-                _safe_filename(output_filename)
-                if output_filename
-                else f"{target.stem}_dsp56300.asm"
-            )
-            out_path = _get_output_dir(target) / out_name
-            out_path.write_text(full_output, encoding="utf-8")
-            if len(full_output) > 20000:
-                return (
-                    f"Full DSP56300 disassembly ({line_count} lines, {len(full_output)} chars) "
-                    f"saved to: {out_path}\n"
-                    f"Use search_workspace_files or read_workspace_file to inspect the full listing.\n\n"
-                    f"Preview:\n{full_output[:15000]}\n... [truncated {len(full_output) - 15000} chars]"
-                )
-            return f"Saved DSP56300 disassembly to {out_path}\n\n{full_output}"
-
-        return full_output
+        out_name = (
+            _safe_filename(output_filename)
+            if output_filename
+            else f"{target.stem}_dsp56300.asm"
+        )
+        return _spill_or_preview_text(
+            full_output,
+            target,
+            out_name,
+            max_inline_chars=3500,
+            max_inline_lines=65,
+            force_save=save_output,
+        )
 
 
 @mcp.tool()
@@ -1611,9 +1674,9 @@ def capa_detect_capabilities(binary_path: str, timeout_seconds: int = 180) -> st
 
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
     output = (res.stdout or res.stderr).strip()
-    if len(output) > 20000:
-        return output[:20000] + f"\n... [truncated {len(output) - 20000} chars]"
-    return output or "No capabilities detected by capa."
+    if not output:
+        return "No capabilities detected by capa."
+    return _spill_or_preview_text(output, target, f"{target.stem}_capa.txt")
 
 
 @mcp.tool()
@@ -1627,15 +1690,15 @@ def archive_list(archive_path: str) -> str:
 
     if target.suffix.lower() in {".squashfs", ".sqsh"} or data_head[:4] == b"hsqs":
         res = subprocess.run(["unsquashfs", "-ll", str(target)], capture_output=True, text=True, timeout=30)
-        return (res.stdout or res.stderr).strip()[:15000]
+        return _spill_or_preview_text((res.stdout or res.stderr).strip(), target, f"{target.stem}_archive_list.txt")
 
     if shutil.which("innoextract"):
         inno = subprocess.run(["innoextract", "-l", str(target)], capture_output=True, text=True, timeout=30)
         if inno.returncode == 0:
-            return inno.stdout.strip()[:15000]
+            return _spill_or_preview_text(inno.stdout.strip(), target, f"{target.stem}_archive_list.txt")
 
     res = subprocess.run(["7z", "l", "-y", str(target)], capture_output=True, text=True, timeout=30)
-    return (res.stdout or res.stderr).strip()[:15000]
+    return _spill_or_preview_text((res.stdout or res.stderr).strip(), target, f"{target.stem}_archive_list.txt")
 
 
 @mcp.tool()
@@ -1704,7 +1767,7 @@ def binwalk_scan(file_path: str, extract: bool = False) -> str:
     output = res.stdout.strip()
     if extract:
         output += f"\n\n[Extracted files saved under {out_dir}]"
-    return output
+    return _spill_or_preview_text(output, target, f"{target.stem}_binwalk.txt")
 
 
 @mcp.tool()
@@ -1754,9 +1817,7 @@ def floss_extract_strings(
     if res.returncode != 0 and not res.stdout:
         return f"Error executing floss: {res.stderr}"
     out = res.stdout.strip()
-    if len(out) > 20000:
-        return out[:20000] + f"\n... [truncated {len(out) - 20000} chars]"
-    return out
+    return _spill_or_preview_text(out, target, f"{target.stem}_floss_strings.txt")
 
 
 # =====================================================================
@@ -1794,9 +1855,7 @@ def r2_imports_exports_sections(binary_path: str) -> str:
         timeout=30
     )
     out = (res.stdout or res.stderr).strip()
-    if len(out) > 20000:
-        return out[:20000] + f"\n... [truncated {len(out) - 20000} chars]"
-    return out
+    return _spill_or_preview_text(out, target, f"{target.stem}_imports_exports_sections.txt")
 
 
 @mcp.tool()
@@ -1893,7 +1952,8 @@ def r2_xrefs(
         text=True,
         timeout=120
     )
-    return (res.stdout or res.stderr).strip() or f"No cross-references found for {target_addr_or_name}."
+    out = (res.stdout or res.stderr).strip() or f"No cross-references found for {target_addr_or_name}."
+    return _spill_or_preview_text(out, target, f"{target.stem}_xrefs_{target_addr_or_name}.txt")
 
 
 @mcp.tool()
@@ -1912,7 +1972,8 @@ def r2_callgraph(binary_path: str, function_name_or_addr: str) -> str:
         text=True,
         timeout=90
     )
-    return (res.stdout or res.stderr).strip() or "No callgraph generated."
+    out = (res.stdout or res.stderr).strip() or "No callgraph generated."
+    return _spill_or_preview_text(out, target, f"{target.stem}_callgraph_{function_name_or_addr}.json")
 
 
 @mcp.tool()
@@ -1950,7 +2011,8 @@ def r2_disassemble_function(
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
     if result.returncode != 0 and not result.stdout:
         return f"Error executing r2: {result.stderr}"
-    return result.stdout.strip() or "No disassembly generated. Verify the function identifier."
+    out = result.stdout.strip() or "No disassembly generated. Verify the function identifier."
+    return _spill_or_preview_text(out, target, f"{target.stem}_{function_name_or_addr}_r2.asm")
 
 
 @mcp.tool()
@@ -1976,7 +2038,8 @@ def r2_decompile_function(
         text=True,
         timeout=90
     )
-    return result.stdout.strip() or f"Error generating pseudocode: {result.stderr}"
+    out = result.stdout.strip() or f"Error generating pseudocode: {result.stderr}"
+    return _spill_or_preview_text(out, target, f"{target.stem}_{function_name_or_addr}_pdc.c")
 
 
 # =====================================================================
@@ -2051,7 +2114,7 @@ def ghidra_decompile_function(
         if "=== GHIDRA_DECOMP_START ===" in combined:
             body = combined.split("=== GHIDRA_DECOMP_START ===", 1)[1]
             body = body.split("=== GHIDRA_DECOMP_END ===", 1)[0].strip()
-            return body
+            return _spill_or_preview_text(body, target, f"{target.stem}_{function_name_or_addr}_ghidra.c")
         for line in combined.splitlines():
             if "ERROR:" in line:
                 return line.strip()
@@ -2211,7 +2274,8 @@ def jadx_extract_manifest(apk_path: str) -> str:
 
         manifest_path = Path(tmp_dir) / "resources" / "AndroidManifest.xml"
         if manifest_path.exists():
-            return manifest_path.read_text(encoding="utf-8", errors="replace")
+            text = manifest_path.read_text(encoding="utf-8", errors="replace")
+            return _spill_or_preview_text(text, target, f"{target.stem}_AndroidManifest.xml")
         return "AndroidManifest.xml not found in decompiled output."
 
 
@@ -2263,7 +2327,8 @@ def jadx_decompile_class(apk_path: str, class_fqn: str) -> str:
     target = _validate_path(apk_path)
     cached_file = _get_output_dir(target) / f"{target.stem}_jadx" / "sources" / (class_fqn.replace(".", "/") + ".java")
     if cached_file.exists():
-        return cached_file.read_text(encoding="utf-8", errors="replace")
+        text = cached_file.read_text(encoding="utf-8", errors="replace")
+        return _spill_or_preview_text(text, target, f"{target.stem}_{class_fqn}.java")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         cmd = [
@@ -2279,11 +2344,13 @@ def jadx_decompile_class(apk_path: str, class_fqn: str) -> str:
         decompiled_file = Path(tmp_dir) / relative_java_path
 
         if decompiled_file.exists():
-            return decompiled_file.read_text(encoding="utf-8", errors="replace")
+            text = decompiled_file.read_text(encoding="utf-8", errors="replace")
+            return _spill_or_preview_text(text, target, f"{target.stem}_{class_fqn}.java")
 
         matches = list(Path(tmp_dir).glob(f"**/{class_fqn.split('.')[-1]}.java"))
         if matches:
-            return matches[0].read_text(encoding="utf-8", errors="replace")
+            text = matches[0].read_text(encoding="utf-8", errors="replace")
+            return _spill_or_preview_text(text, target, f"{target.stem}_{class_fqn}.java")
 
         return f"Class '{class_fqn}' could not be located in output. stderr: {res.stderr}"
 
@@ -2352,7 +2419,7 @@ def dotnet_list_types(assembly_path: str) -> str:
     )
     if res.returncode != 0 and not res.stdout:
         return f"ilspycmd failed: {res.stderr}"
-    return res.stdout.strip()
+    return _spill_or_preview_text(res.stdout.strip(), target, f"{target.stem}_dotnet_types.txt")
 
 
 @mcp.tool()
@@ -2377,7 +2444,7 @@ def dotnet_decompile(
             timeout=90
         )
         out = (res.stdout or res.stderr).strip()
-        return out[:20000] if len(out) > 20000 else out
+        return _spill_or_preview_text(out, target, f"{target.stem}_{type_name}.cs")
 
     folder_name = _safe_filename(output_name) if output_name else f"{target.stem}_dotnet_src"
     out_dir = _get_output_dir(target) / folder_name
@@ -2461,7 +2528,7 @@ def pyc_decompile(pyc_path: str) -> str:
     if not out and shutil.which("pycdas"):
         dis = subprocess.run(["pycdas", str(target)], capture_output=True, text=True, timeout=45)
         out = f"// pycdc decompilation incomplete; bytecode disassembly (pycdas):\n{dis.stdout}"
-    return out[:20000] if len(out) > 20000 else (out or res.stderr)
+    return _spill_or_preview_text(out or res.stderr, target, f"{target.stem}_decompiled.py")
 
 
 # =====================================================================
@@ -2533,11 +2600,7 @@ def wasm_decompile(wasm_path: str, mode: str = "decompile") -> str:
 
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     out = (res.stdout or res.stderr).strip()
-    if len(out) > 20000:
-        out_file = _get_output_dir(target) / f"{target.stem}.{mode}.txt"
-        out_file.write_text(out, encoding="utf-8")
-        return f"Full output saved to {out_file} ({len(out)} chars).\n\nPreview:\n{out[:15000]}"
-    return out
+    return _spill_or_preview_text(out, target, f"{target.stem}.{mode}.txt")
 
 
 # =====================================================================
@@ -2703,7 +2766,7 @@ def dynamic_trace_syscalls(
                 + ((exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")))
             )
 
-        return out.strip()[-15000:]
+        return _spill_or_preview_text(out.strip(), target, f"{target.stem}_{tracer}_trace.txt")
 
 
 @mcp.tool()
@@ -2734,7 +2797,9 @@ def gdb_analyze(
 
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
     out = ((res.stdout or "") + "\n" + (res.stderr or "")).strip()
-    return out[:20000] if len(out) > 20000 else (out or "No output returned by debugger.")
+    if not out:
+        return "No output returned by debugger."
+    return _spill_or_preview_text(out, target, f"{target.stem}_{debugger}_batch.txt")
 
 
 # =====================================================================
@@ -3091,36 +3156,49 @@ def crypto_and_data_transform(
             "'swap32', 'swap16', or 'hashes'."
         )
 
-    saved_msg = ""
-    if output_filename:
-        out_root = _get_output_dir(target_path) if target_path else (WORKSPACE_OUTPUT if WORKSPACE_OUTPUT.exists() else Path("/tmp"))
-        out_file = out_root / _safe_filename(output_filename)
-        out_file.write_bytes(result)
-        saved_msg = f"Saved {len(result)} transformed bytes to: {out_file}\n"
+    out_root = _get_output_dir(target_path) if target_path else OUTPUT_DIR
+    out_root.mkdir(parents=True, exist_ok=True)
 
-    # Format canonical hex + ASCII preview
-    dump_lines: list[str] = []
-    preview_bytes = result[:4096]
-    for i in range(0, len(preview_bytes), 16):
-        row = preview_bytes[i : i + 16]
+    # Format full canonical hex + ASCII dump
+    full_dump_lines: list[str] = []
+    for i in range(0, len(result), 16):
+        row = result[i : i + 16]
         left_h = " ".join(f"{b:02X}" for b in row[:8])
         right_h = " ".join(f"{b:02X}" for b in row[8:])
         hex_col = f"{left_h}  {right_h}" if right_h else left_h
         ascii_col = "".join(chr(b) if 0x20 <= b <= 0x7E else "." for b in row)
-        dump_lines.append(f"{i:08X}:  {hex_col:<48}  |{ascii_col}|")
+        full_dump_lines.append(f"{i:08X}:  {hex_col:<48}  |{ascii_col}|")
+
+    saved_notes: list[str] = []
+    if output_filename or len(result) > 256:
+        stem = target_path.stem if target_path else "payload"
+        bin_name = _safe_filename(output_filename or f"{stem}_{alg}_{op}_{len(result)}B.bin")
+        bin_file = out_root / bin_name
+        bin_file.write_bytes(result)
+        hex_file = out_root / _safe_filename(f"{bin_name}.hex.txt")
+        hex_file.write_text("\n".join(full_dump_lines) + "\n", encoding="utf-8")
+        saved_notes.append(f"Auto-saved raw transformed binary ({len(result)} B) to: {bin_file}")
+        saved_notes.append(f"Auto-saved full hex+ASCII dump ({len(full_dump_lines)} lines) to: {hex_file}")
+
+    preview_lines = full_dump_lines[:16]
+    raw_preview_len = min(len(result), 128)
 
     return "\n".join([
         f"=== Crypto & Data Transform ({alg.upper()} / {op.upper()} / {mode_norm}) ===",
         *notes,
         f"Output Size: {len(result)} bytes (Shannon Entropy: {_shannon_entropy(result):.2f}/8.00)",
-        *( [saved_msg.strip()] if saved_msg else [] ),
+        *saved_notes,
         "",
-        "--- Canonical Hex + ASCII Preview ---",
-        "\n".join(dump_lines),
-        *( [f"... [{len(result) - 4096} additional bytes omitted from preview]"] if len(result) > 4096 else [] ),
+        f"--- Canonical Hex + ASCII Preview (first {min(len(result), 256)} B) ---",
+        "\n".join(preview_lines),
+        *(
+            [f"... [omitted {len(result) - 256} B ({len(full_dump_lines) - 16} lines) from LLM context — full dump in {hex_file}]"]
+            if len(result) > 256
+            else []
+        ),
         "",
-        f"--- Raw Hex (first {min(len(result), 512)} B) ---",
-        result[:512].hex().upper(),
+        f"--- Raw Hex (first {raw_preview_len} B) ---",
+        result[:raw_preview_len].hex().upper() + ("..." if len(result) > raw_preview_len else ""),
     ])
 
 
@@ -3369,12 +3447,23 @@ namespace RedoAlgorithmSkeleton
     out_file = out_root / out_name
     out_file.write_text(skeleton, encoding="utf-8")
 
+    # Abbreviate any long hex literals (>128 chars) in the LLM inline preview to save context
+    compact_skeleton = re.sub(
+        r'"([0-9A-F]{64})[0-9A-F]{65,}"',
+        r'"\1... [full table embedded in saved skeleton file]"',
+        skeleton,
+    )
+    compact_lines = compact_skeleton.splitlines()
+    preview_body = "\n".join(compact_lines[:60])
+    if len(compact_lines) > 60:
+        preview_body += f"\n... [omitted {len(compact_lines) - 60} lines — full skeleton saved to {out_file}]"
+
     return (
         f"=== Generated {lang.upper()} Algorithm Skeleton: {out_file} ===\n"
         f"Target Function: {function_name_or_addr} in {target.name}\n"
         f"CFG Blocks Extracted: {len(blocks_summary)}\n"
-        f"Embedded Tables: {len(extracted_tables)}\n\n"
-        f"{skeleton[:18000]}"
+        f"Embedded Tables: {len(extracted_tables)} (written in full to {out_file})\n\n"
+        f"{preview_body}"
     )
 
 
