@@ -31,12 +31,24 @@ if [[ -z "${PROJECT_DIR}" ]]; then
 fi
 
 PROJECT_DIR="$(cd "${PROJECT_DIR}" && pwd)"
+PROJECT_LEAF="$(basename "${PROJECT_DIR}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^[-._]+//; s/[-._]+$//')"
+if [[ -z "${PROJECT_LEAF}" ]]; then
+    PROJECT_LEAF="workspace"
+fi
+CONTAINER_NAME="redo-${PROJECT_LEAF}"
+
+# Remove any stale/previous container for this project so --name always succeeds cleanly
+docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+
 SAMPLES_DIR="${PROJECT_DIR}/samples"
 OUTPUT_DIR="${PROJECT_DIR}/output"
 mkdir -p "${SAMPLES_DIR}" "${OUTPUT_DIR}"
 
 DOCKER_ARGS=(
     run -i --rm
+    --name "${CONTAINER_NAME}"
+    --hostname "${CONTAINER_NAME}"
+    --label "redo.project=${PROJECT_DIR}"
     --network none
     --cap-drop ALL
     --cap-add CHOWN

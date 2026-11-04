@@ -59,6 +59,16 @@ if (-not $ProjectDir) {
 }
 
 $NormalizedProject = ((Resolve-Path $ProjectDir).Path -replace "\\", "/").TrimEnd("/")
+$ProjectLeaf = (Split-Path -Leaf $NormalizedProject).ToLowerInvariant() -replace '[^a-z0-9_.-]', '-'
+$ProjectLeaf = $ProjectLeaf.Trim('-', '.', '_')
+if (-not $ProjectLeaf) {
+    $ProjectLeaf = "workspace"
+}
+$ContainerName = "redo-$ProjectLeaf"
+
+# Remove any stale/previous container for this project so --name always succeeds cleanly
+& $DockerCmd rm -f $ContainerName *> $null
+
 $SamplesDir = Join-Path $NormalizedProject "samples"
 $OutputDir  = Join-Path $NormalizedProject "output"
 
@@ -75,6 +85,9 @@ $ProjectMount = "${NormalizedProject}:/workspace/project:rw"
 
 $DockerArgs = @(
     "run", "-i", "--rm",
+    "--name", $ContainerName,
+    "--hostname", $ContainerName,
+    "--label", "redo.project=${NormalizedProject}",
     "--network", "none",
     "--cap-drop", "ALL",
     "--cap-add", "CHOWN",

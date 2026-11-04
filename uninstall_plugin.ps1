@@ -35,9 +35,15 @@ $GhcrImage = "ghcr.io/mat-ocl/redo:latest"
 
 Write-Host "[*] Uninstalling redo from project: $TargetWorkspace" -ForegroundColor Cyan
 
-# 1. Stop any running redo containers for this image
+# 1. Stop any running redo container for this project
+$ProjectLeaf = (Split-Path -Leaf ($TargetWorkspace.TrimEnd('/', '\'))).ToLowerInvariant() -replace '[^a-z0-9_.-]', '-'
+$ProjectLeaf = $ProjectLeaf.Trim('-', '.', '_')
+if ($ProjectLeaf) {
+    $ContainerName = "redo-$ProjectLeaf"
+    & docker rm -f $ContainerName *> $null
+}
 $runningGhcr = & docker ps -q --filter "ancestor=$GhcrImage" 2>$null
-if ($runningGhcr) {
+if ($runningGhcr -and $RemoveImage) {
     Write-Host "[*] Stopping running '$GhcrImage' containers..." -ForegroundColor Cyan
     & docker stop $runningGhcr *> $null
 }

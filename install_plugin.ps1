@@ -15,13 +15,15 @@ if (-not $RepoRoot) {
     $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 }
 
+$NormalizedRepoRoot = ((Resolve-Path $RepoRoot).Path -replace "\\", "/").TrimEnd("/")
+
 # Resolve target project directory (defaults to current working directory if different from $RepoRoot)
 if (-not $TargetWorkspace) {
-    $cwd = (Get-Location).Path
-    if ($cwd -ne $RepoRoot) {
+    $cwd = ((Get-Location).Path -replace "\\", "/").TrimEnd("/")
+    if ($cwd -ne $NormalizedRepoRoot) {
         $TargetWorkspace = $cwd
     } else {
-        throw "Please specify the target project folder to install redo into:`n  .\install_plugin.ps1 -TargetWorkspace '<ProjectPath>'"
+        throw "Please specify the target project folder to install redo into (do not install into the redo clone itself):`n  .\install_plugin.ps1 -TargetWorkspace '<ProjectPath>'"
     }
 }
 
@@ -29,6 +31,9 @@ if (-not (Test-Path $TargetWorkspace)) {
     New-Item -ItemType Directory -Path $TargetWorkspace -Force | Out-Null
 }
 $ResolvedTarget = ((Resolve-Path $TargetWorkspace).Path -replace "\\", "/").TrimEnd("/")
+if ($ResolvedTarget -eq $NormalizedRepoRoot) {
+    throw "TargetWorkspace ('$ResolvedTarget') cannot be the redo installer clone itself. Pass your actual project folder path to -TargetWorkspace."
+}
 
 if ($Uninstall) {
     $UninstallScript = Join-Path $RepoRoot "uninstall_plugin.ps1"
