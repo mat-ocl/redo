@@ -52,6 +52,7 @@ if (Test-Path $TargetWorkspace) {
         ".agents\rules\AGENTS.md",
         ".zed\settings.json",
         ".cursor\mcp.json",
+        ".claude\settings.local.json",
         ".vscode\mcp.json",
         ".mcp.json"
     )) {
@@ -63,7 +64,7 @@ if (Test-Path $TargetWorkspace) {
     }
 
     # Remove empty dot-directories if nothing else is inside them
-    foreach ($emptyCandidate in @(".agents\plugins", ".agents\skills", ".agents\rules", ".agents", ".zed", ".cursor", ".vscode")) {
+    foreach ($emptyCandidate in @(".agents\plugins", ".agents\skills", ".agents\rules", ".agents", ".zed", ".cursor", ".claude", ".vscode")) {
         $dirPath = Join-Path $TargetWorkspace $emptyCandidate
         if (Test-Path $dirPath) {
             $remaining = Get-ChildItem -Path $dirPath -Force -ErrorAction SilentlyContinue

@@ -1,8 +1,162 @@
 {
+  "agent": {
+    "tool_permissions": {
+      "tools": {
+        "mcp:redo:list_workspace_files": {
+          "default": "allow"
+        },
+        "mcp:redo:read_workspace_file": {
+          "default": "allow"
+        },
+        "mcp:redo:search_workspace_files": {
+          "default": "allow"
+        },
+        "mcp:redo:stage_file_from_base64": {
+          "default": "allow"
+        },
+        "mcp:redo:stage_text_file": {
+          "default": "allow"
+        },
+        "mcp:redo:binary_hex_dump": {
+          "default": "allow"
+        },
+        "mcp:redo:binary_hex_convert": {
+          "default": "allow"
+        },
+        "mcp:redo:file_triage": {
+          "default": "allow"
+        },
+        "mcp:redo:diec_detect": {
+          "default": "allow"
+        },
+        "mcp:redo:pe_elf_headers": {
+          "default": "allow"
+        },
+        "mcp:redo:yara_scan": {
+          "default": "allow"
+        },
+        "mcp:redo:cpp_rtti_and_vtables": {
+          "default": "allow"
+        },
+        "mcp:redo:dsp56300_disassemble": {
+          "default": "allow"
+        },
+        "mcp:redo:dsp56300_assemble": {
+          "default": "allow"
+        },
+        "mcp:redo:capa_detect_capabilities": {
+          "default": "allow"
+        },
+        "mcp:redo:archive_list": {
+          "default": "allow"
+        },
+        "mcp:redo:archive_extract": {
+          "default": "allow"
+        },
+        "mcp:redo:binwalk_scan": {
+          "default": "allow"
+        },
+        "mcp:redo:upx_unpack": {
+          "default": "allow"
+        },
+        "mcp:redo:floss_extract_strings": {
+          "default": "allow"
+        },
+        "mcp:redo:r2_binary_info": {
+          "default": "allow"
+        },
+        "mcp:redo:r2_imports_exports_sections": {
+          "default": "allow"
+        },
+        "mcp:redo:r2_strings": {
+          "default": "allow"
+        },
+        "mcp:redo:r2_list_functions": {
+          "default": "allow"
+        },
+        "mcp:redo:r2_xrefs": {
+          "default": "allow"
+        },
+        "mcp:redo:r2_callgraph": {
+          "default": "allow"
+        },
+        "mcp:redo:r2_disassemble_function": {
+          "default": "allow"
+        },
+        "mcp:redo:r2_decompile_function": {
+          "default": "allow"
+        },
+        "mcp:redo:ghidra_decompile_function": {
+          "default": "allow"
+        },
+        "mcp:redo:ghidra_list_functions": {
+          "default": "allow"
+        },
+        "mcp:redo:ghidra_decompile_all": {
+          "default": "allow"
+        },
+        "mcp:redo:ghidra_headless_analyze": {
+          "default": "allow"
+        },
+        "mcp:redo:jadx_extract_manifest": {
+          "default": "allow"
+        },
+        "mcp:redo:jadx_list_classes": {
+          "default": "allow"
+        },
+        "mcp:redo:jadx_decompile_class": {
+          "default": "allow"
+        },
+        "mcp:redo:jadx_decompile_all_and_search": {
+          "default": "allow"
+        },
+        "mcp:redo:apktool_decode": {
+          "default": "allow"
+        },
+        "mcp:redo:dotnet_list_types": {
+          "default": "allow"
+        },
+        "mcp:redo:dotnet_decompile": {
+          "default": "allow"
+        },
+        "mcp:redo:pyinstaller_extract_and_decompile": {
+          "default": "allow"
+        },
+        "mcp:redo:pyc_decompile": {
+          "default": "allow"
+        },
+        "mcp:redo:go_extract_symbols": {
+          "default": "allow"
+        },
+        "mcp:redo:wasm_decompile": {
+          "default": "allow"
+        },
+        "mcp:redo:asar_list": {
+          "default": "allow"
+        },
+        "mcp:redo:asar_extract": {
+          "default": "allow"
+        },
+        "mcp:redo:js_beautify_file": {
+          "default": "allow"
+        },
+        "mcp:redo:js_deobfuscate": {
+          "default": "allow"
+        },
+        "mcp:redo:rea_analyze": {
+          "default": "allow"
+        },
+        "mcp:redo:dynamic_trace_syscalls": {
+          "default": "allow"
+        },
+        "mcp:redo:gdb_analyze": {
+          "default": "allow"
+        }
+      }
+    }
+  },
   "context_servers": {
     "redo": {
-      "source": "custom",
-      "command": "pwsh",
       "args": [
         "-NoProfile",
         "-NonInteractive",
@@ -11,7 +165,9 @@
         "-File",
         "./run_re_mcp.ps1"
       ],
-      "env": {}
+      "source": "custom",
+      "env": {},
+      "command": "pwsh"
     }
   }
 }

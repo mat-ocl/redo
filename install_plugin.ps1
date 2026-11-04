@@ -141,9 +141,21 @@ if (Test-Path $SourceAgents) {
     Write-Host "[+] Installed workspace rules & skills: $DestAgents" -ForegroundColor Green
 }
 
-# 5. Write workspace-scoped editor MCP configs inside <Project> (Zero global config files touched)
+# 5. Write workspace-scoped editor MCP configs & tool permissions inside <Project>
 
-# 5a. Zed Editor: <Project>/.zed/settings.json
+# Extract all @mcp.tool() names from re_mcp_server.py so Zed auto-allows all 50 redo tools
+$ZedToolPermissions = [ordered]@{}
+$ServerPyFile = Join-Path $ProjectPluginDir "re_mcp_server.py"
+if (Test-Path $ServerPyFile) {
+    $PyContent = Get-Content -Path $ServerPyFile -Raw -Encoding UTF8
+    $ToolMatches = [regex]::Matches($PyContent, '(?m)^@mcp\.tool\(\)\s*\r?\ndef\s+([a-zA-Z0-9_]+)\s*\(')
+    foreach ($m in $ToolMatches) {
+        $toolName = $m.Groups[1].Value
+        $ZedToolPermissions["mcp:redo:$toolName"] = @{ default = "allow" }
+    }
+}
+
+# 5a. Zed Editor: <Project>/.zed/settings.json (includes context_servers.redo + agent.tool_permissions)
 $ZedDir = Join-Path $ResolvedTarget ".zed"
 New-Item -ItemType Directory -Path $ZedDir -Force | Out-Null
 $ZedSettingsPath = Join-Path $ZedDir "settings.json"
@@ -156,8 +168,13 @@ $ZedSettingsPath = Join-Path $ZedDir "settings.json"
             env     = @{}
         }
     }
+    agent = @{
+        tool_permissions = @{
+            tools = $ZedToolPermissions
+        }
+    }
 } | ConvertTo-Json -Depth 6 | Set-Content -Path $ZedSettingsPath -Encoding UTF8
-Write-Host "[+] Wrote Zed workspace config: $ZedSettingsPath" -ForegroundColor Green
+Write-Host "[+] Wrote Zed workspace config & tool permissions ($($ZedToolPermissions.Count) tools allowed): $ZedSettingsPath" -ForegroundColor Green
 
 # 5b. Cursor: <Project>/.cursor/mcp.json
 $CursorDir = Join-Path $ResolvedTarget ".cursor"
@@ -173,7 +190,7 @@ $CursorMcpPath = Join-Path $CursorDir "mcp.json"
 } | ConvertTo-Json -Depth 6 | Set-Content -Path $CursorMcpPath -Encoding UTF8
 Write-Host "[+] Wrote Cursor workspace config: $CursorMcpPath" -ForegroundColor Green
 
-# 5c. Claude Code: <Project>/.mcp.json
+# 5c. Claude Code: <Project>/.mcp.json + <Project>/.claude/settings.local.json (tool permissions)
 $ClaudeMcpPath = Join-Path $ResolvedTarget ".mcp.json"
 @{
     mcpServers = @{
@@ -183,7 +200,21 @@ $ClaudeMcpPath = Join-Path $ResolvedTarget ".mcp.json"
         }
     }
 } | ConvertTo-Json -Depth 6 | Set-Content -Path $ClaudeMcpPath -Encoding UTF8
-Write-Host "[+] Wrote Claude Code workspace config: $ClaudeMcpPath" -ForegroundColor Green
+
+$ClaudeDir = Join-Path $ResolvedTarget ".claude"
+New-Item -ItemType Directory -Path $ClaudeDir -Force | Out-Null
+$ClaudeSettingsPath = Join-Path $ClaudeDir "settings.local.json"
+@{
+    permissions = @{
+        allow = @(
+            "mcp__redo",
+            "mcp__redo__*"
+        )
+    }
+    enableAllProjectMcpServers = $true
+    enabledMcpjsonServers      = @("redo")
+} | ConvertTo-Json -Depth 6 | Set-Content -Path $ClaudeSettingsPath -Encoding UTF8
+Write-Host "[+] Wrote Claude Code workspace config & tool permissions: $ClaudeMcpPath, $ClaudeSettingsPath" -ForegroundColor Green
 
 # 5d. VS Code (Copilot MCP): <Project>/.vscode/mcp.json
 $VsCodeDir = Join-Path $ResolvedTarget ".vscode"

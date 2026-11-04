@@ -48,10 +48,10 @@ What this single command does inside `<ActiveWorkspacePath>`:
 2. Creates `<Project>\samples\` and `<Project>\output\`.
 3. Installs a self-contained copy of `run_re_mcp.ps1`, `run_re_mcp.sh`, `re_mcp_server.py`, `uninstall_plugin.ps1`, `plugin.json`, `mcp_config.json`, `rules/`, and `skills/` into `<Project>\.agents\plugins\redo\` (auto-discovered by **Antigravity**).
 4. Copies `.agents/rules` and `.agents/skills` into `<Project>\.agents\`.
-5. Writes workspace-scoped MCP configs inside `<Project>` so all major editors work automatically with `-ProjectDir "<Project>"`:
-   - `<Project>\.zed\settings.json` (**Zed Editor**)
+5. Writes workspace-scoped MCP configs **and pre-approved `redo` tool permissions** inside `<Project>` so all major editors work automatically with `-ProjectDir "<Project>"` without prompting on every tool call:
+   - `<Project>\.zed\settings.json` (**Zed Editor**: `context_servers.redo` + `agent.tool_permissions.tools` allowing all 50 `mcp:redo:<tool>` tools)
    - `<Project>\.cursor\mcp.json` (**Cursor**)
-   - `<Project>\.mcp.json` (**Claude Code**)
+   - `<Project>\.mcp.json` + `<Project>\.claude\settings.local.json` (**Claude Code**: `mcpServers.redo` + `permissions.allow: ["mcp__redo", "mcp__redo__*"]`)
    - `<Project>\.vscode\mcp.json` (**VS Code**)
 
 ---
