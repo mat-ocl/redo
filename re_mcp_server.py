@@ -40,7 +40,7 @@ if os.path.isdir(_dsp_bin) and _dsp_bin not in os.environ.get("PATH", ""):
     os.environ["PATH"] = f"{_dsp_bin}:{os.environ.get('PATH', '')}"
 
 # Initialize the MCP server
-mcp = MCPServer("RE-Sandbox-Tools")
+mcp = MCPServer("redo")
 
 WORKSPACE_DIR = Path("/workspace").resolve()
 SAMPLES_DIR = (WORKSPACE_DIR / "samples").resolve()

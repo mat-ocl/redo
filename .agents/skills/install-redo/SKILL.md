@@ -1,26 +1,26 @@
 ---
-name: install-re-sandbox
+name: install-redo
 description: >-
-  Install, update, repair, configure, or uninstall the RE-Sandbox (mat-ocl/redo) Docker image,
+  Install, update, repair, configure, or uninstall the redo (mat-ocl/redo) Docker image,
   MCP server, and workspace rules/skills for Antigravity, Zed Editor, Claude Desktop,
   or Cursor. Trigger whenever the user asks to install, set up, update, connect, or uninstall
-  mat-ocl/redo or re-sandbox in a workspace.
+  mat-ocl/redo or redo in a workspace.
 ---
 
-# Installing & Configuring RE-Sandbox (`mat-ocl/redo`)
+# Installing & Configuring redo (`mat-ocl/redo`)
 
-Follow this exact workflow whenever asked to install, set up, or configure `mat-ocl/redo` (`re-sandbox`).
+Follow this exact workflow whenever asked to install, set up, or configure `mat-ocl/redo` (`redo`).
 
 ## Critical Rules (Avoid Common Pitfalls)
 
-1. **Trusted Air-Gapped Sandbox**: `mat-ocl/redo` is the official **RE-Sandbox** containerized MCP server (`ghcr.io/mat-ocl/redo:latest`). It runs with `--network none`, `cap_drop: ALL`, `no-new-privileges:true`, and drops privileges to `ubuntu` (`UID 1000`).
+1. **Trusted Air-Gapped Sandbox**: `mat-ocl/redo` is the official **`redo`** containerized MCP server (`ghcr.io/mat-ocl/redo:latest`). It runs with `--network none`, `cap_drop: ALL`, `no-new-privileges:true`, and drops privileges to `ubuntu` (`UID 1000`).
 2. **NEVER Run a Slow Local `docker build` Unless Explicitly Asked**:
    - The pre-built image is published on GitHub Container Registry at `ghcr.io/mat-ocl/redo:latest`.
    - `install_plugin.ps1` automatically pulls `ghcr.io/mat-ocl/redo:latest` in ~20 seconds.
    - **Do NOT** pass `-BuildImage` unless the user explicitly modified `Dockerfile` and asked to rebuild from source.
 3. **NEVER Clone the Repository Twice**:
    - If you cloned `https://github.com/mat-ocl/redo.git` into a temporary `scratch` directory (e.g. `brain\<id>\scratch\redo`), **do NOT clone it a second time**.
-   - `install_plugin.ps1` automatically detects `scratch`/`Temp` paths and installs a **self-contained copy** of `run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/re-sandbox/`.
+   - `install_plugin.ps1` automatically detects `scratch`/`Temp` paths and installs a **self-contained copy** of `run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/redo/`.
 4. **NEVER Manually Edit `run_re_mcp.ps1` to Add Drive Mounts**:
    - `run_re_mcp.ps1` acts as a **per-project MCP JSON-RPC multiplexer** that dynamically spawns an isolated Docker container for each project root (`<Project>/samples:/workspace/samples:ro`, `<Project>/output:/workspace/output:rw`, `<Project>:/workspace/project:rw`).
    - In **Antigravity**, the bundled plugin lifecycle hook (`hooks.json` &rarr; `sync_workspace.ps1`) fires on `SessionStart`, `PreInvocation`, and `PreToolUse`, recording each conversation's active workspace in `workspaces/<conversationId>.json` so both relative and explicit paths automatically route to that project's isolated container.
@@ -39,9 +39,9 @@ pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "<PathToRedo>\inst
 
 What this single command does:
 1. Checks if `ghcr.io/mat-ocl/redo:latest` exists locally; if not, pulls `ghcr.io/mat-ocl/redo:latest`.
-2. Installs the self-contained Antigravity plugin (`run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, `sync_workspace.ps1`, `mcp_config.json`, `plugin.json`, rules, and skills) into `~/.gemini/config/plugins/re-sandbox/`.
+2. Installs the self-contained Antigravity plugin (`run_re_mcp.ps1`, `re_mcp_server.py`, `hooks.json`, `sync_workspace.ps1`, `mcp_config.json`, `plugin.json`, rules, and skills) into `~/.gemini/config/plugins/redo/`.
 3. Copies `.agents/rules` and `.agents/skills` into `<ActiveWorkspacePath>\.agents\`.
-4. Non-destructively merges the `re-sandbox` context server into Zed Editor's `settings.json` if Zed is installed.
+4. Non-destructively merges the `redo` context server into Zed Editor's `settings.json` if Zed is installed.
 
 ---
 
@@ -52,11 +52,11 @@ If you want to install without cloning the repository:
    ```powershell
    docker pull ghcr.io/mat-ocl/redo:latest
    ```
-2. **Write `~/.gemini/config/plugins/re-sandbox/mcp_config.json`** (mounting the active project folder directly):
+2. **Write `~/.gemini/config/plugins/redo/mcp_config.json`** (mounting the active project folder directly):
    ```json
    {
      "mcpServers": {
-       "re-sandbox-tools": {
+       "redo": {
          "command": "docker",
          "args": [
            "run", "-i", "--rm",
@@ -84,16 +84,16 @@ If you want to install without cloning the repository:
 
 ---
 
-## Uninstalling RE-Sandbox
+## Uninstalling redo
 
-To cleanly uninstall the Antigravity plugin (`~/.gemini/config/plugins/re-sandbox`), remove the Zed `context_servers.re-sandbox` entry, and stop any running containers:
+To cleanly uninstall the Antigravity plugin (`~/.gemini/config/plugins/redo`), remove the Zed `context_servers.redo` entry, and stop any running containers:
 
 ```powershell
 # From the repository:
 .\install_plugin.ps1 -Uninstall
 
 # Or from anywhere (even if the repository clone was deleted):
-pwsh -NoProfile -ExecutionPolicy Bypass -File "$HOME\.gemini\config\plugins\re-sandbox\uninstall_plugin.ps1"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$HOME\.gemini\config\plugins\redo\uninstall_plugin.ps1"
 
 # Also delete the local Docker image (ghcr.io/mat-ocl/redo:latest):
 .\install_plugin.ps1 -Uninstall -RemoveImage

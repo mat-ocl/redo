@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build-and-publish:
-    name: Build & Push RE-Sandbox Image
+    name: Build & Push redo Image
     runs-on: ubuntu-24.04
     timeout-minutes: 60
 

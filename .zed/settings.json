@@ -1,6 +1,6 @@
 {
   "context_servers": {
-    "re-sandbox": {
+    "redo": {
       "source": "custom",
       "command": "pwsh",
       "args": [

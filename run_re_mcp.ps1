@@ -11,7 +11,7 @@ if (-not $RepoRoot) {
     $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 }
 
-$PluginStateDir = Join-Path $HOME ".gemini\config\plugins\re-sandbox"
+$PluginStateDir = Join-Path $HOME ".gemini\config\plugins\redo"
 if (-not (Test-Path $PluginStateDir)) {
     $PluginStateDir = $RepoRoot
 }
@@ -26,16 +26,11 @@ if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) {
     }
 }
 
-# 2b. Ensure Docker image exists locally; fall back to tagging legacy re-sandbox:latest or pulling from GHCR
+# 2b. Ensure Docker image exists locally; pull from GHCR if missing
 & $DockerCmd image inspect $ImageName *> $null
 if ($LASTEXITCODE -ne 0) {
-    & $DockerCmd image inspect "re-sandbox:latest" *> $null
-    if ($LASTEXITCODE -eq 0) {
-        & $DockerCmd tag "re-sandbox:latest" $ImageName *> $null
-    } else {
-        [Console]::Error.WriteLine("[*] Local image '$ImageName' not found. Pulling '$ImageName'...")
-        & $DockerCmd pull $ImageName *> $null
-    }
+    [Console]::Error.WriteLine("[*] Local image '$ImageName' not found. Pulling '$ImageName'...")
+    & $DockerCmd pull $ImageName *> $null
 }
 
 # 3. Check if this MCP server instance is explicitly pinned to a project (-ProjectDir or RE_PROJECT_DIR)

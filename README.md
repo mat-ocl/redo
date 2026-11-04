@@ -1,8 +1,8 @@
-# RE-Sandbox: Containerized Reverse Engineering & DSP MCP Toolkit
+# redo: Containerized Reverse Engineering & DSP MCP Toolkit
 
 [![Build & Publish Docker Image](https://github.com/mat-ocl/redo/actions/workflows/docker-image.yml/badge.svg)](https://github.com/mat-ocl/redo/actions/workflows/docker-image.yml)
 
-**RE-Sandbox** (`ghcr.io/mat-ocl/redo:latest`) is a hardened, air-gapped Docker environment and **Model Context Protocol (MCP)** server (`re_mcp_server.py`) that equips AI coding agents (Antigravity, Zed, Claude Code, Cursor, Windsurf, VS Code) and human analysts with **50 specialized reverse-engineering, binary triage, decompilation, hex conversion, and DSP analysis tools**.
+**`redo`** (`ghcr.io/mat-ocl/redo:latest`) is a hardened, air-gapped Docker environment and **Model Context Protocol (MCP)** server (`re_mcp_server.py`) that equips AI coding agents (Antigravity, Zed, Claude Code, Cursor, Windsurf, VS Code) and human analysts with **50 specialized reverse-engineering, binary triage, decompilation, hex conversion, and DSP analysis tools**.
 
 ---
 
@@ -55,7 +55,7 @@ flowchart LR
 
 ## Quick Start & Installation
 
-You can install and run **RE-Sandbox** in two ways:
+You can install and run **`redo`** in two ways:
 1. **Zero-Clone Mode (For AI Agents & Direct Docker Setup)**: Pull the pre-built image from GHCR (or build directly from the GitHub URL) and run `re-mcp-server` straight from the container image—**no `git clone` or local scripts on disk required**.
 2. **Local Repository / Plugin Mode (Recommended)**: Run `install_plugin.ps1` / `install_zed.ps1` to install the self-contained plugin and workspace hooks that automatically mount whichever project you open.
 
@@ -81,7 +81,7 @@ Mount your project directory (e.g. `D:/Code/my-project` on Windows or `/home/use
   ```json
   {
     "context_servers": {
-      "re-sandbox": {
+      "redo": {
         "source": "custom",
         "command": "C:/Program Files/Docker/Docker/resources/bin/docker.exe",
         "args": [
@@ -113,7 +113,7 @@ Mount your project directory (e.g. `D:/Code/my-project` on Windows or `/home/use
   ```json
   {
     "mcpServers": {
-      "re-sandbox-tools": {
+      "redo": {
         "command": "docker",
         "args": [
           "run", "-i", "--rm",
@@ -161,18 +161,18 @@ From PowerShell inside the cloned repository directory (even if cloned into a te
 *(Only pass `.\install_plugin.ps1 -BuildImage` if you modified `Dockerfile` and want to recompile the 4-stage image locally from scratch instead of pulling `ghcr.io/mat-ocl/redo:latest`).*
 
 > [!TIP]
-> **Self-Contained Scratch Clone Support**: `install_plugin.ps1` copies `run_re_mcp.ps1`, `re_mcp_server.py`, `uninstall_plugin.ps1`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/re-sandbox/`. If an AI agent clones this repository into a temporary `scratch` folder to run `.\install_plugin.ps1`, it does **not** need to clone the repository a second time.
+> **Self-Contained Scratch Clone Support**: `install_plugin.ps1` copies `run_re_mcp.ps1`, `re_mcp_server.py`, `uninstall_plugin.ps1`, `hooks.json`, and `sync_workspace.ps1` directly into `~/.gemini/config/plugins/redo/`. If an AI agent clones this repository into a temporary `scratch` folder to run `.\install_plugin.ps1`, it does **not** need to clone the repository a second time.
 
 ### Uninstalling
 
-To remove the Antigravity plugin (`~/.gemini/config/plugins/re-sandbox`), clean up Zed's `context_servers.re-sandbox` entry, and stop any running `re-sandbox` containers:
+To remove the Antigravity plugin (`~/.gemini/config/plugins/redo`), clean up Zed's `context_servers.redo` entry, and stop any running `redo` containers:
 
 ```powershell
 # From the repository:
 .\install_plugin.ps1 -Uninstall
 
 # Or from anywhere (even if the repository clone was deleted):
-& "$HOME\.gemini\config\plugins\re-sandbox\uninstall_plugin.ps1"
+& "$HOME\.gemini\config\plugins\redo\uninstall_plugin.ps1"
 
 # Also delete the ~4.3 GB local Docker image (ghcr.io/mat-ocl/redo:latest):
 .\install_plugin.ps1 -Uninstall -RemoveImage
@@ -181,14 +181,14 @@ To remove the Antigravity plugin (`~/.gemini/config/plugins/re-sandbox`), clean 
 ### 3. Configure MCP Clients
 
 #### A. Google Antigravity IDE
-Running `.\install_plugin.ps1` automatically installs the `re-sandbox` plugin (including its MCP config, `hooks.json` workspace sync hook, agent rules, and `reverse-engineering` / `install-re-sandbox` skills) into `~/.gemini/config/plugins/re-sandbox`. You can toggle it on or off anytime from the Antigravity Plugins panel (`customization://re-sandbox`).
+Running `.\install_plugin.ps1` automatically installs the `redo` plugin (including its MCP config, `hooks.json` workspace sync hook, agent rules, and `reverse-engineering` / `install-redo` skills) into `~/.gemini/config/plugins/redo`. You can toggle it on or off anytime from the Antigravity Plugins panel (`customization://redo`).
 
 #### B. Zed Editor (Turnkey Installation)
 This repository includes a dedicated installer and workspace configuration for **Zed Editor**:
 
-- **Project-Local Configuration ([`.zed/settings.json`](./.zed/settings.json) & [`AGENTS.md`](./AGENTS.md))**: Opening this repository in Zed automatically registers the `re-sandbox` context server and loads [`AGENTS.md`](./AGENTS.md) into Zed's Agent Panel.
+- **Project-Local Configuration ([`.zed/settings.json`](./.zed/settings.json) & [`AGENTS.md`](./AGENTS.md))**: Opening this repository in Zed automatically registers the `redo` context server and loads [`AGENTS.md`](./AGENTS.md) into Zed's Agent Panel.
 - **Global Zed Installation (`%APPDATA%\Zed\settings.json` on Windows / `~/.config/zed/settings.json` on Linux & macOS)**:
-  Run the dedicated Zed installer script to non-destructively merge `re-sandbox` into your global Zed `context_servers` (while preserving your existing JSONC comments and settings):
+  Run the dedicated Zed installer script to non-destructively merge `redo` into your global Zed `context_servers` (while preserving your existing JSONC comments and settings):
 
   ```powershell
   # Windows (PowerShell) - uses run_re_mcp.ps1 launcher (recommended for multi-project support):
@@ -207,7 +207,7 @@ This repository includes a dedicated installer and workspace configuration for *
   ```json
   {
     "context_servers": {
-      "re-sandbox": {
+      "redo": {
         "source": "custom",
         "command": "pwsh",
         "args": [
@@ -231,7 +231,7 @@ Add the following entry to your MCP configuration file (`claude_desktop_config.j
 ```json
 {
   "mcpServers": {
-    "re-sandbox-tools": {
+    "redo": {
       "command": "pwsh",
       "args": [
         "-NoProfile",
@@ -250,7 +250,7 @@ Add the following entry to your MCP configuration file (`claude_desktop_config.j
 ```json
 {
   "mcpServers": {
-    "re-sandbox-tools": {
+    "redo": {
       "command": "/bin/bash",
       "args": [
         "/path/to/redo/run_re_mcp.sh"
@@ -370,7 +370,7 @@ dsp56300_disassemble(
 
 ## Binary Hex Inspection & Conversion (`BinHexConv`)
 
-LLMs cannot reliably read raw binary files (`.bin`, `.rom`, `.syx`) using standard text file readers without corrupting non-ASCII bytes. **RE-Sandbox** includes [`mat-ocl/binhexconv`](https://github.com/mat-ocl/binhexconv) (`bin2hext`) and two dedicated MCP tools for binary-to-hex analysis:
+LLMs cannot reliably read raw binary files (`.bin`, `.rom`, `.syx`) using standard text file readers without corrupting non-ASCII bytes. **`redo`** includes [`mat-ocl/binhexconv`](https://github.com/mat-ocl/binhexconv) (`bin2hext`) and two dedicated MCP tools for binary-to-hex analysis:
 
 - **`binary_hex_dump`**: Inspect any `[byte_offset, byte_length]` window of a binary file in `canonical` (`hexdump -C` offset + hex + ASCII), `u24be` (24-bit DSP56300 word tables with `P:$xxxx` addresses), `spaced`, `raw`, or `c_array` format, and search for wildcard byte patterns (e.g., `search_hex_pattern="F0 43 ?? 00"` for MIDI SysEx headers).
 - **`binary_hex_convert`**: Convert entire binary files or slices into hexadecimal text files in `output/` (`direction="bin_to_hex"`) and reconstruct binary files from edited hex text (`direction="hex_to_bin"`, automatically stripping whitespace, newlines, or `0x` prefixes).
@@ -418,7 +418,7 @@ Unlike single-container MCP wrappers that freeze volume mounts at IDE startup, `
 How per-project routing and path resolution work across simultaneous projects:
 - **Explicit Host Paths**: When an agent passes any host path (`C:/CODE/ProjectA/samples/foo.dll` or `D:/Projects/ProjectB/rom.bin`), the multiplexer automatically detects the enclosing project root (via registered workspaces or project markers like `.git`, `.agents`, `.zed`, `.vscode`, `CMakeLists.txt`), spawns or reuses the container dedicated exclusively to that project, and routes the tool call to it.
 - **Relative Project Paths (`samples/foo.bin`, `"M3 Plug-In Editor.dll"`, or empty `list_workspace_files({})`)**:
-  - **Google Antigravity**: The bundled lifecycle hook (`plugin/re-sandbox/hooks.json` &rarr; `sync_workspace.ps1`) fires on `SessionStart`, `PreInvocation`, and synchronously on `PreToolUse` right before every tool call, recording each conversation's workspace in `workspaces/<conversationId>.json`. The multiplexer checks open workspaces for matching relative files first and falls back to the active conversation's workspace—rewriting relative paths to full project paths and routing them to that project's isolated container automatically.
+  - **Google Antigravity**: The bundled lifecycle hook (`plugin/redo/hooks.json` &rarr; `sync_workspace.ps1`) fires on `SessionStart`, `PreInvocation`, and synchronously on `PreToolUse` right before every tool call, recording each conversation's workspace in `workspaces/<conversationId>.json`. The multiplexer checks open workspaces for matching relative files first and falls back to the active conversation's workspace—rewriting relative paths to full project paths and routing them to that project's isolated container automatically.
   - **Zed Editor, Cursor, VS Code, Windsurf, and Claude Code**: Spawn the MCP server process with its working directory (`$PWD` / `Get-Location`) set to the open project root, which `run_re_mcp.ps1` and `run_re_mcp.sh` detect automatically.
 
 ---
@@ -436,7 +436,7 @@ How per-project routing and path resolution work across simultaneous projects:
 ├── run_re_mcp.ps1              # Per-project Windows PowerShell MCP JSON-RPC container multiplexer
 ├── run_re_mcp.sh               # Per-project Linux / macOS / WSL MCP JSON-RPC container multiplexer
 ├── install_plugin.ps1          # One-command installer / uninstaller for Antigravity, Zed & Docker
-├── uninstall_plugin.ps1        # Standalone uninstaller (also copied into ~/.gemini/config/plugins/re-sandbox/)
+├── uninstall_plugin.ps1        # Standalone uninstaller (also copied into ~/.gemini/config/plugins/redo/)
 ├── install_zed.ps1             # Dedicated Zed Editor installer (updates %APPDATA%\Zed\settings.json & .zed/settings.json)
 ├── install_zed.sh              # Dedicated Zed Editor installer for Linux / macOS
 ├── entrypoint.sh               # Container entrypoint (privilege drop via gosu ubuntu)
@@ -447,11 +447,11 @@ How per-project routing and path resolution work across simultaneous projects:
 ├── samples/                    # Default read-only input directory (.gitkeep)
 ├── output/                     # Default read-write output directory (.gitkeep)
 ├── plugin/
-│   └── re-sandbox/             # Distributable Antigravity plugin bundle (includes hooks.json & sync_workspace.ps1)
+│   └── redo/                   # Distributable Antigravity plugin bundle (includes hooks.json & sync_workspace.ps1)
 └── .agents/
     ├── rules/
     │   └── AGENTS.md           # Workspace agent rules for binary, hex & DSP analysis
     └── skills/
-        ├── install-re-sandbox/ # Agent skill for autonomous installation & setup
-        └── reverse-engineering/# Workflow skill for re-sandbox-tools MCP server
+        ├── install-redo/       # Agent skill for autonomous installation & setup
+        └── reverse-engineering/# Workflow skill for redo MCP server
 ```

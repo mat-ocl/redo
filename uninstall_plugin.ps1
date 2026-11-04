@@ -8,27 +8,21 @@ param(
 $ErrorActionPreference = "Continue"
 
 $GhcrImage = "ghcr.io/mat-ocl/redo:latest"
-$LocalImage = "re-sandbox:latest"
 
 if (-not $PluginDest) {
-    $PluginDest = Join-Path $HOME ".gemini\config\plugins\re-sandbox"
+    $PluginDest = Join-Path $HOME ".gemini\config\plugins\redo"
 }
 
-Write-Host "[*] Uninstalling RE-Sandbox (mat-ocl/redo)..." -ForegroundColor Cyan
+Write-Host "[*] Uninstalling redo (mat-ocl/redo)..." -ForegroundColor Cyan
 
-# 1. Stop any running re-sandbox containers
-$running = & docker ps -q --filter "ancestor=$LocalImage" 2>$null
-if ($running) {
-    Write-Host "[*] Stopping running '$LocalImage' containers..." -ForegroundColor Cyan
-    & docker stop $running *> $null
-}
+# 1. Stop any running redo containers
 $runningGhcr = & docker ps -q --filter "ancestor=$GhcrImage" 2>$null
 if ($runningGhcr) {
     Write-Host "[*] Stopping running '$GhcrImage' containers..." -ForegroundColor Cyan
     & docker stop $runningGhcr *> $null
 }
 
-# 2. Remove Antigravity plugin directory (~/.gemini/config/plugins/re-sandbox)
+# 2. Remove Antigravity plugin directory (~/.gemini/config/plugins/redo)
 if (Test-Path $PluginDest) {
     Remove-Item -Path $PluginDest -Recurse -Force
     Write-Host "[+] Removed Antigravity plugin directory: $PluginDest" -ForegroundColor Green
@@ -59,7 +53,7 @@ if (Test-Path $PluginDest) {
 if ($TargetWorkspace -and (Test-Path $TargetWorkspace)) {
     foreach ($rel in @(
         ".agents\skills\reverse-engineering",
-        ".agents\skills\install-re-sandbox",
+        ".agents\skills\install-redo",
         ".agents\rules\AGENTS.md"
     )) {
         $targetPath = Join-Path $TargetWorkspace $rel
@@ -75,28 +69,29 @@ if (-not $SkipZed -and $env:APPDATA) {
     $ZedSettingsPath = Join-Path $env:APPDATA "Zed\settings.json"
     if (Test-Path $ZedSettingsPath) {
         $RawText = Get-Content -Path $ZedSettingsPath -Raw -Encoding UTF8
-        if ($RawText -match '"re-sandbox(?:-tools)?"\s*:\s*\{') {
-            # Remove the "re-sandbox" block inside context_servers
+        if ($RawText -match '"redo(?:-tools)?"\s*:\s*\{') {
+            # Remove the "redo" block inside context_servers
             $Cleaned = [regex]::Replace(
                 $RawText,
-                '(?ms)\s*"re-sandbox(?:-tools)?"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?',
+                '(?ms)\s*"redo(?:-tools)?"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?',
                 ""
             )
             # Clean up any trailing comma before closing brace of context_servers
             $Cleaned = [regex]::Replace($Cleaned, ',(\s*\})', '$1')
             Set-Content -Path $ZedSettingsPath -Value $Cleaned -NoNewline -Encoding UTF8
-            Write-Host "[+] Removed 're-sandbox' from global Zed settings: $ZedSettingsPath" -ForegroundColor Green
+            Write-Host "[+] Removed 'redo' from global Zed settings: $ZedSettingsPath" -ForegroundColor Green
         }
     }
 }
 
-# 5. Optionally remove Docker images
+# 5. Optionally remove Docker image
 if ($RemoveImage) {
-    Write-Host "[*] Removing Docker images '$LocalImage' and '$GhcrImage'..." -ForegroundColor Cyan
-    & docker rmi -f $LocalImage $GhcrImage 2>$null
-    Write-Host "[+] Docker images removed." -ForegroundColor Green
+    Write-Host "[*] Removing Docker image '$GhcrImage'..." -ForegroundColor Cyan
+    & docker rmi -f $GhcrImage 2>$null
+    Write-Host "[+] Docker image removed." -ForegroundColor Green
 } else {
     Write-Host "[i] Docker image '$GhcrImage' was kept cached locally (pass -RemoveImage to delete the ~4.3 GB image)." -ForegroundColor Yellow
 }
 
-Write-Host "[+] RE-Sandbox uninstall complete." -ForegroundColor Green
+Write-Host ""
+Write-Host "[+] redo uninstallation complete." -ForegroundColor Green

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ==============================================================================
-# RE-Sandbox Per-Project MCP Container Multiplexer (Linux / macOS)
+# redo Per-Project MCP Container Multiplexer (Linux / macOS)
 # ==============================================================================
 # Spawns and manages an isolated Docker container per project root on demand.
 # Resolves both explicit host paths and relative project paths across open
@@ -30,7 +30,7 @@ repo_root = Path(sys.argv[1]).resolve()
 image_name = sys.argv[2]
 explicit_proj = sys.argv[3].strip() if len(sys.argv) > 3 else ""
 startup_cwd = Path.cwd().resolve()
-plugin_state_dir = Path.home() / ".gemini" / "config" / "plugins" / "re-sandbox"
+plugin_state_dir = Path.home() / ".gemini" / "config" / "plugins" / "redo"
 
 PATH_PARAM_KEYS = (
     "file_path", "binary_path", "archive_path", "apk_path", "asar_path",

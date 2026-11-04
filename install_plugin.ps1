@@ -71,15 +71,15 @@ if (-not $SkipImage) {
     }
 }
 
-# 2. Install/Update Antigravity Plugin (~/.gemini/config/plugins/re-sandbox)
+# 2. Install/Update Antigravity Plugin (~/.gemini/config/plugins/redo)
 if (-not $PluginDest) {
-    $PluginDest = Join-Path $HOME ".gemini\config\plugins\re-sandbox"
+    $PluginDest = Join-Path $HOME ".gemini\config\plugins\redo"
 }
 
 # Detect if running from a temporary/scratch clone (e.g. Antigravity brain\...\scratch or Temp)
 $IsTempClone = ($RepoRoot -match '(?i)(\\scratch\\|\\temp\\|/tmp/)') -or $SelfContained
 
-$PluginSource = Join-Path $RepoRoot "plugin\re-sandbox"
+$PluginSource = Join-Path $RepoRoot "plugin\redo"
 if (Test-Path $PluginSource) {
     Write-Host "[*] Installing Antigravity plugin to: $PluginDest" -ForegroundColor Cyan
     New-Item -ItemType Directory -Path $PluginDest -Force | Out-Null
@@ -112,7 +112,7 @@ if (Test-Path $PluginSource) {
     # Dynamically write mcp_config.json with the resolved path to run_re_mcp.ps1
     $McpConfigObj = @{
         mcpServers = @{
-            "re-sandbox-tools" = @{
+            "redo" = @{
                 command = "pwsh"
                 args = @(
                     "-NoProfile",
@@ -175,7 +175,7 @@ Write-Host "Add this to your claude_desktop_config.json, .cursor/mcp.json, or mc
 Write-Host @"
 {
   "mcpServers": {
-    "re-sandbox-tools": {
+    "redo": {
       "command": "pwsh",
       "args": [
         "-NoProfile",

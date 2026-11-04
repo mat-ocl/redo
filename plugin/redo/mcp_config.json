@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "re-sandbox-tools": {
+    "redo": {
       "command": "pwsh",
       "args": [
         "-NoProfile",

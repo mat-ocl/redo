@@ -31,7 +31,7 @@ if ($BuildImage) {
     }
 }
 
-# 2. Construct the 're-sandbox' context_servers entry for Zed
+# 2. Construct the 'redo' context_servers entry for Zed
 if ($Mode -eq "docker") {
     $DockerExe = "docker"
     if (Test-Path "C:\Program Files\Docker\Docker\resources\bin\docker.exe") {
@@ -60,7 +60,7 @@ if ($Mode -eq "docker") {
 
     $ArgsJsonList = ($DockerArgs | ForEach-Object { "        `"$_`"" }) -join ",`n"
     $ServerBlockJson = @"
-    "re-sandbox": {
+    "redo": {
       "source": "custom",
       "command": "$DockerExe",
       "args": [
@@ -69,9 +69,10 @@ $ArgsJsonList
       "env": {}
     }
 "@
+    $LocalServerBlockJson = $ServerBlockJson
 } else {
     $ServerBlockJson = @"
-    "re-sandbox": {
+    "redo": {
       "source": "custom",
       "command": "pwsh",
       "args": [
@@ -85,6 +86,21 @@ $ArgsJsonList
       "env": {}
     }
 "@
+    $LocalServerBlockJson = @"
+    "redo": {
+      "source": "custom",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "./run_re_mcp.ps1"
+      ],
+      "env": {}
+    }
+"@
 }
 
 # 3. Update workspace-local .zed/settings.json
@@ -94,7 +110,7 @@ $LocalZedSettings = Join-Path $LocalZedDir "settings.json"
 $LocalJsonContent = @"
 {
   "context_servers": {
-$ServerBlockJson
+$LocalServerBlockJson
   }
 }
 "@
@@ -108,11 +124,19 @@ if (-not $ZedSettingsPath) {
     $ZedSettingsPath = Join-Path $ZedConfigDir "settings.json"
 }
 
+$GlobalJsonContent = @"
+{
+  "context_servers": {
+$ServerBlockJson
+  }
+}
+"@
+
 if (-not (Test-Path $ZedSettingsPath)) {
-    Set-Content -Path $ZedSettingsPath -Value $LocalJsonContent -Encoding UTF8
+    Set-Content -Path $ZedSettingsPath -Value $GlobalJsonContent -Encoding UTF8
     Write-Host "[+] Created global Zed settings at: $ZedSettingsPath" -ForegroundColor Green
 } else {
-    $BackupPath = "${ZedSettingsPath}.re-sandbox.bak"
+    $BackupPath = "${ZedSettingsPath}.redo.bak"
     Copy-Item -Path $ZedSettingsPath -Destination $BackupPath -Force
     Write-Host "[*] Backed up existing Zed settings to: $BackupPath" -ForegroundColor DarkGray
 
@@ -157,7 +181,7 @@ if (-not (Test-Path $ZedSettingsPath)) {
         $CtxCloseIdx = Find-MatchingBrace -Text $RawText -OpenIdx $CtxOpenIdx
         if ($CtxCloseIdx -gt $CtxOpenIdx) {
             $CtxBody = $RawText.Substring($CtxOpenIdx, $CtxCloseIdx - $CtxOpenIdx + 1)
-            $ReMatch = [regex]::Match($CtxBody, '"re-sandbox(?:-tools)?"\s*:\s*\{')
+            $ReMatch = [regex]::Match($CtxBody, '"redo(?:-tools)?"\s*:\s*\{')
             if ($ReMatch.Success) {
                 $ReOpenInBody = $ReMatch.Index + $ReMatch.Length - 1
                 $ReCloseInBody = Find-MatchingBrace -Text $CtxBody -OpenIdx $ReOpenInBody
@@ -167,13 +191,13 @@ if (-not (Test-Path $ZedSettingsPath)) {
                     $ReplacementEntry = $ServerBlockJson.TrimStart()
                     $UpdatedText = $RawText.Substring(0, $AbsStart) + $ReplacementEntry + $RawText.Substring($AbsEnd + 1)
                     Set-Content -Path $ZedSettingsPath -Value $UpdatedText -NoNewline -Encoding UTF8
-                    Write-Host "[+] Updated existing 're-sandbox' entry in global Zed settings: $ZedSettingsPath" -ForegroundColor Green
+                    Write-Host "[+] Updated existing 'redo' entry in global Zed settings: $ZedSettingsPath" -ForegroundColor Green
                 }
             } else {
                 # Insert inside context_servers right after its opening '{'
                 $UpdatedText = $RawText.Substring(0, $CtxOpenIdx + 1) + "`n" + $ServerBlockJson + "," + $RawText.Substring($CtxOpenIdx + 1)
                 Set-Content -Path $ZedSettingsPath -Value $UpdatedText -NoNewline -Encoding UTF8
-                Write-Host "[+] Added 're-sandbox' to 'context_servers' in global Zed settings: $ZedSettingsPath" -ForegroundColor Green
+                Write-Host "[+] Added 'redo' to 'context_servers' in global Zed settings: $ZedSettingsPath" -ForegroundColor Green
             }
         }
     } else {
@@ -192,12 +216,12 @@ $ServerBlockJson
             }
             $UpdatedText = $Prefix + "`n" + $CtxBlock + "`n"
             Set-Content -Path $ZedSettingsPath -Value $UpdatedText -NoNewline -Encoding UTF8
-            Write-Host "[+] Added 'context_servers.re-sandbox' block to global Zed settings: $ZedSettingsPath" -ForegroundColor Green
+            Write-Host "[+] Added 'context_servers.redo' block to global Zed settings: $ZedSettingsPath" -ForegroundColor Green
         }
     }
 }
 
-# 5. Optionally append RE-Sandbox rules to global %APPDATA%\Zed\AGENTS.md
+# 5. Optionally append redo rules to global %APPDATA%\Zed\AGENTS.md
 if ($InstallGlobalRules) {
     $ZedAgentsPath = Join-Path (Split-Path -Parent $ZedSettingsPath) "AGENTS.md"
     $RepoRulesPath = Join-Path $RepoRoot ".agents\rules\AGENTS.md"
@@ -205,11 +229,11 @@ if ($InstallGlobalRules) {
         $RulesContent = Get-Content -Path $RepoRulesPath -Raw -Encoding UTF8
         if (Test-Path $ZedAgentsPath) {
             $ExistingAgents = Get-Content -Path $ZedAgentsPath -Raw -Encoding UTF8
-            if ($ExistingAgents -notmatch "Reverse Engineering Sandbox Rules") {
+            if ($ExistingAgents -notmatch "redo Reverse Engineering Rules") {
                 Add-Content -Path $ZedAgentsPath -Value "`n`n$RulesContent" -Encoding UTF8
-                Write-Host "[+] Appended RE-Sandbox rules to global Zed AGENTS.md: $ZedAgentsPath" -ForegroundColor Green
+                Write-Host "[+] Appended redo rules to global Zed AGENTS.md: $ZedAgentsPath" -ForegroundColor Green
             } else {
-                Write-Host "[*] RE-Sandbox rules already present in $ZedAgentsPath" -ForegroundColor Yellow
+                Write-Host "[*] redo rules already present in $ZedAgentsPath" -ForegroundColor Yellow
             }
         } else {
             Set-Content -Path $ZedAgentsPath -Value $RulesContent -Encoding UTF8
@@ -219,4 +243,4 @@ if ($InstallGlobalRules) {
 }
 
 Write-Host ""
-Write-Host "Zed Editor integration is ready! Open Zed -> Agent Panel -> verify 're-sandbox' MCP server is active." -ForegroundColor Cyan
+Write-Host "Zed Editor integration is ready! Open Zed -> Agent Panel -> verify 'redo' MCP server is active." -ForegroundColor Cyan

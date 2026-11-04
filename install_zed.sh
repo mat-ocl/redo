@@ -10,7 +10,7 @@ mkdir -p "${REPO_ROOT}/.zed"
 cat > "${REPO_ROOT}/.zed/settings.json" <<EOF
 {
   "context_servers": {
-    "re-sandbox": {
+    "redo": {
       "source": "custom",
       "command": "/bin/bash",
       "args": [

@@ -3,12 +3,12 @@ name: reverse-engineering
 description: >-
   Reverse-engineer native PE/ELF/Mach-O binaries, Motorola DSP56300 firmware/ROMs,
   C++ RTTI/VTables, .NET assemblies, Android APKs, PyInstaller/Python bytecode,
-  Go binaries, WebAssembly, and Electron ASAR archives using the containerized re-sandbox-tools MCP server.
+  Go binaries, WebAssembly, and Electron ASAR archives using the containerized redo MCP server.
 ---
 
-# Reverse Engineering Workflow (`re-sandbox-tools`)
+# Reverse Engineering Workflow (`redo`)
 
-Use the `re-sandbox-tools` MCP server whenever analyzing compiled binaries, DSP firmware, or packed archives.
+Use the `redo` MCP server whenever analyzing compiled binaries, DSP firmware, or packed archives.
 
 ## 1. Per-Project Path Handling
 - Pass the relative path inside the active project (e.g. `samples/target.exe`) or full path inside the active workspace directly to the MCP tools.
