@@ -2,14 +2,14 @@
 
 [![Build & Publish Docker Image](https://github.com/mat-ocl/redo/actions/workflows/docker-image.yml/badge.svg)](https://github.com/mat-ocl/redo/actions/workflows/docker-image.yml)
 
-**`redo`** (`ghcr.io/mat-ocl/redo:latest`) is a hardened, air-gapped Docker environment and **Model Context Protocol (MCP)** server (`re_mcp_server.py`) that equips AI coding agents (Antigravity, Zed, Claude Code, Cursor, Windsurf, VS Code) and human analysts with **50 specialized reverse-engineering, binary triage, decompilation, hex conversion, and DSP analysis tools**.
+**`redo`** (`ghcr.io/mat-ocl/redo:latest`) is a hardened, air-gapped Docker environment and **Model Context Protocol (MCP)** server (`re_mcp_server.py`) that equips AI coding agents (Antigravity, Zed, Claude Code, Cursor, Windsurf, VS Code) and human analysts with **52 specialized reverse-engineering, binary triage, decompilation, hex conversion, crypto/data transform, and DSP analysis tools**.
 
 ---
 
 ## Key Features
 
 - **Air-Gapped & Privilege-Dropped Execution**: Runs with `--network none`, `cap_drop: ALL`, `no-new-privileges:true`, a read-only `/workspace/samples` mount, and drops root privileges to unprivileged user `ubuntu` (`UID 1000`) via `gosu`.
-- **50 Turnkey MCP Tools**: Unified FastMCP server (`re_mcp_server.py`) covering Native PE/ELF/Mach-O, C++ RTTI/VTables, **Motorola DSP56300** 24-bit DSP ROMs, Binary/Hex-Text inspection & conversion (`BinHexConv`), .NET/C#, Android APK/DEX, Python/PyInstaller, Go, WebAssembly, Electron ASAR/JS, Firmware/Installers, and Dynamic Tracing.
+- **52 Turnkey MCP Tools**: Unified FastMCP server (`re_mcp_server.py`) covering Native PE/ELF/Mach-O, C++ RTTI/VTables, **Motorola DSP56300** 24-bit DSP ROMs, Binary/Hex-Text inspection & conversion (`BinHexConv`), CyberChef-style Crypto/S-Box transforms (`crypto_and_data_transform`), Algorithm Reimplementation Skeletons (`generate_algorithm_skeleton`), .NET/C#, Android APK/DEX, Python/PyInstaller, Go, WebAssembly, Electron ASAR/JS, Firmware/Installers, and Dynamic Tracing.
 - **Persistent Ghidra 12.2 Headless Cache**: Automatically fingerprints binaries into `<project>/output/ghidra_cache/` so subsequent `ghidra_decompile_function` calls execute in ~3–5 seconds, plus a `fast_mode=True` option that decompiles functions in 20MB+ C++ binaries in ~8 seconds without waiting for full-program auto-analysis.
 - **Motorola DSP56300 Toolchain (`dsp56300-disasm` & `dsp56300-asm`)**: Native support for disassembling and assembling 24-bit Motorola/Freescale/NXP DSP56300 code (`u24be`, `u24le`, `u32le`, `u32be`, `u24be_swap16`) including direct byte-offset slicing from larger firmware or host binaries.
 - **LLM-Friendly Binary Hex Inspection & Conversion (`BinHexConv` / `bin2hext`)**: Built-in `binary_hex_dump` (with wildcard hex pattern search `F0 43 ??`, canonical hex+ASCII, and `u24be` 24-bit DSP word tables) and `binary_hex_convert` (powered by [`mat-ocl/binhexconv`](https://github.com/mat-ocl/binhexconv)) for converting binary/SysEx/ROM files to hexadecimal text and back.
@@ -174,9 +174,9 @@ To remove `redo` from a project (`<Project>/.agents/plugins/redo`, `.zed/setting
 
 ---
 
-## Complete MCP Tool Reference (50 Tools)
+## Complete MCP Tool Reference (52 Tools)
 
-### 1. Workspace, File Staging & Binary/Hex-Text Conversion
+### 1. Workspace, File Staging, Binary/Hex-Text & Crypto Transforms
 | MCP Tool | Description |
 | :--- | :--- |
 | `list_workspace_files` | List files in the active project (`/workspace/project`), `samples/`, `output/`, or a relative subfolder. |
@@ -184,15 +184,16 @@ To remove `redo` from a project (`<Project>/.agents/plugins/redo`, `.zed/setting
 | `search_workspace_files` | Regex search across all decompiled or extracted files in `output/`. |
 | `stage_file_from_base64` | Upload a binary or archive directly into the sandbox over MCP via Base64. |
 | `stage_text_file` | Write custom scripts, YARA rules, DSP56300 assembly, or Ghidra post-scripts into the workspace. |
-| `binary_hex_dump` | Inspect binary slices (`[byte_offset, byte_length]`) in LLM-friendly formats (`canonical` hex+ASCII, `u24be` 24-bit DSP words, `u16le`/`u32le`, `spaced`, `raw`, `c_array`) with wildcard hex pattern search (`F0 43 ??`). |
-| `binary_hex_convert` | Bidirectional Binary &harr; Hexadecimal text converter powered by [`binhexconv`](https://github.com/mat-ocl/binhexconv) (`bin2hext -b/-h`) and whitespace-tolerant hex decoding. |
+| `binary_hex_dump` | Inspect binary slices (`[byte_offset, byte_length]` or `[virtual_address, byte_length]`) in LLM-friendly formats (`canonical` hex+ASCII, `u24be` 24-bit DSP words, `u16le`/`u32le`, `spaced`, `raw`, `c_array`) with wildcard hex pattern search (`F0 43 ??`). |
+| `binary_hex_convert` | Bidirectional Binary &harr; Hexadecimal text converter powered by [`binhexconv`](https://github.com/mat-ocl/binhexconv) (`bin2hext -b/-h`) with `virtual_address` slicing and whitespace-tolerant hex decoding. |
+| `crypto_and_data_transform` | CyberChef-style cipher, custom S-box/P-box, compression, and endian transform tool (`blowfish`, `blowfish_custom_boxes` loaded from binary `pbox_va`/`sbox_va`, `rc4`, `aes`, `des`, `3des`, `chacha20`, `xor`, `zlib`, `raw_deflate`, `lzma`, `swap32`, `swap16`, `hashes`). |
 
-### 2. Initial Triage, Headers, Entropy & Packer Detection
+### 2. Initial Triage, Headers, VA->Offset Resolution, Entropy & Packer Detection
 | MCP Tool | Underlying Engine | Description |
 | :--- | :--- | :--- |
 | `file_triage` | `file`, `diec`, `upx`, Python | Universal initial triage: hashes (MD5/SHA256), Shannon entropy, UPX check, DIE compiler/packer summary, and ecosystem detection. |
 | `diec_detect` | Detect-It-Easy (`diec` 3.21) | Deep compiler, linker, protector (VMProtect, Themida, UPX), and section entropy scan. |
-| `pe_elf_headers` | `pefile`, `pyelftools`, `rabin2`, `osslsigncode` | Inspect PE/ELF sections with Shannon entropy, exports, TLS callbacks, PE resource tables, overlays, and Authenticode signatures. |
+| `pe_elf_headers` | `pefile`, `pyelftools`, `rabin2`, `osslsigncode` | Inspect PE/ELF sections with VA, RVA, raw file offset (`PointerToRawData` / `sh_offset`), Shannon entropy, exports, TLS callbacks, PE resource tables, overlays, Authenticode signatures, and `lookup_va` VA/RVA &rarr; file offset resolution. |
 | `yara_scan` | `yara` + DIE & Community Rules | Scan binaries against built-in rule packs (`all_die`, `peid`, `packer`, `crypto`, `malware`, `community_packers`, `community_crypto`) or custom `.yar` files. |
 | `capa_detect_capabilities` | Mandiant `capa` 10.0.0 | Identify program capabilities mapped to MITRE ATT&CK and MBC with function addresses. |
 | `floss_extract_strings` | Mandiant `floss` | Recover obfuscated stack strings, tight strings, decoded strings, and static strings. |
@@ -219,6 +220,7 @@ To remove `redo` from a project (`<Project>/.agents/plugins/redo`, `.zed/setting
 | `r2_callgraph` | `r2` (`agcj`) | Extract JSON caller/callee callgraph for a target function. |
 | `r2_disassemble_function` | `r2` (`af; pdf`) | Fast targeted assembly listing for any function or VTable method address. |
 | `r2_decompile_function` | `r2` (`pdc`) | Quick C-like pseudocode generation via Radare2. |
+| `generate_algorithm_skeleton` | `r2` (`agfj` + `pdc`) + `pefile`/`pyelftools` | Generate a runnable Python (`.py`) or C# (`.cs`) algorithm reimplementation skeleton from a function's CFG basic blocks, pseudocode, immediate constants, and embedded `.rdata`/`.data` lookup tables (`table_vas`). |
 
 ### 5. Managed Runtimes, Bytecode, WebAssembly & Electron
 | MCP Tool | Underlying Engine | Description |

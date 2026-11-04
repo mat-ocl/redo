@@ -151,6 +151,12 @@
         },
         "mcp:redo:gdb_analyze": {
           "default": "allow"
+        },
+        "mcp:redo:crypto_and_data_transform": {
+          "default": "allow"
+        },
+        "mcp:redo:generate_algorithm_skeleton": {
+          "default": "allow"
         }
       }
     }
